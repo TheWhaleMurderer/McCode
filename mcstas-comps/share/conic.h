@@ -1417,9 +1417,6 @@ Vec rotateM(Vec v, double angle, Vec axis) {
 
 @return p weight reduction of the neutron for further simulation
 */
-if (reflect && strlen(reflect) && strcmp(reflect,"NULL") && strcmp(reflect,"0"))
-        TableReflecFunc(q, &pTable, &B);
-else {
 double calcSupermirrorReflectivity(double q, double m, double R_0, double Q_c){
     double arg;
     double beta = 0;//values fitting supermirror data from sn
@@ -1457,7 +1454,6 @@ double calcSupermirrorReflectivity(double q, double m, double R_0, double Q_c){
 
     weight = R_0*0.5*(1 - tanh(arg))*(1 - alpha*(q - Q_c) + beta*(q - Q_c)*(q - Q_c));
     return weight;
-}
 }
 
 /*! \brief Function to handle reflection of neutron for a ConicSurf.
@@ -1810,7 +1806,7 @@ void traceSingleNeutron(_class_particle* _particle, Scene s) {
                 traceNeutronDetector(_particle, s.d[index]);
                 break;
             case FLAT:
-	            traceNeutronFlat(_particle, s.f[index]);
+	        traceNeutronFlat(_particle, s.f[index]);
                 break;
             case DISK:
                 traceNeutronDisk(_particle, s.di[index]);
