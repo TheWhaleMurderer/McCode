@@ -44,7 +44,7 @@
 * reflect: [str]  Name of reflectivity file. Format q(Angs-1) R(0-1)
 * transmit: [1]   When true, non reflected neutrons are transmitted through the mirror, instead of being absorbed.
 * center: [1]     if true (1), the Mirror is centered arount AT position.
-*
+*$1 
 * %D
 * Example values: m=4 Qc=0.02 W=1/300 alpha=6.49 R0=1
 *
