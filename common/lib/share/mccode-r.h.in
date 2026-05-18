@@ -52,11 +52,6 @@
 #include <inttypes.h>
 #include <stdint.h>
 #ifdef OPENACC
-/* Temporary workaround for issue with cabs() in newer NVHPC, see
-https://forums.developer.nvidia.com/t/compilation-issue-with-nvc-version-24-09-and-newer-openacc/331987
- */
-#include <complex.h>
-#define cabs(z) hypot(creal(z), cimag(z))
 #include <openacc.h>
 #ifndef GCCOFFLOAD
 #include <accelmath.h>
@@ -88,7 +83,7 @@ size_t str_len(const char *s);
 #ifndef _TIMES_H
 #define _TIMES_H
 
-#ifdef _WIN32
+#if defined(WIN32) || defined(_WIN32)
 #include <sys/timeb.h>
 #include <sys/types.h>
 #include <winsock2.h>
@@ -164,7 +159,7 @@ clock_t times (struct tms *__buffer) {
 #  define NEED_STAT_H
 #endif
 
-#ifdef WIN32
+#if defined(WIN32) || defined(_WIN32)
 #  define NEED_STAT_H
 #  define NEED_TYPES_H
 #endif
@@ -178,7 +173,7 @@ clock_t times (struct tms *__buffer) {
 #endif
 
 #ifndef MC_PATHSEP_C
-#  ifdef WIN32
+#if defined(WIN32) || defined(_WIN32)
 #    define MC_PATHSEP_C '\\'
 #    define MC_PATHSEP_S "\\"
 #  else  /* !WIN32 */
@@ -187,12 +182,13 @@ clock_t times (struct tms *__buffer) {
 #  endif /* !WIN32 */
 #endif /* MC_PATHSEP_C */
 
-#ifdef WIN32
+#if defined(WIN32) || defined(_WIN32)
 #if defined _MSC_VER
 #include <direct.h>
 #elif defined __GNUC__
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <unistd.h>
 #endif
 #define mkdir(a,b) mkdir(a)
 #define getpid() _getpid()
@@ -673,6 +669,9 @@ double _rand0max(double max, randstate_t* state);
 double _randminmax(double min, double max, randstate_t* state);
 #pragma acc routine
 double _randtriangle(randstate_t* state);
+// version which pass randstate_t* as opague void*
+#pragma acc routine
+double _rand01_opague(void* state);
 
 
 #ifdef USE_OPENCL

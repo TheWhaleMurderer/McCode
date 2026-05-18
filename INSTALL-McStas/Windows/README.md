@@ -1,14 +1,16 @@
-# Installation of McStas 3.5.32 on Windows 64 bit Intel systems (some support for arm64)
+# Installation of McStas 3.6.14 on Windows 64 bit Intel systems (some support for arm64)
 ## *IMPORTANT: active internet connection required during installation*
 
 * Please use either of:
   1. **Recommended:**
-    * Install [Visual Studio including c/c++ support](https://learn.microsoft.com/en-us/cpp/build/building-on-the-command-line?view=msvc-170#download-and-install-the-tools). Any recent version of Visual Studio itself should work. Please install at minumum "Desktop development with c++" selecting VS2019 build tools. You can also use newer VS2022 build tools, but VS2019 must be present also. 
+    * Install [Visual Studio including c/c++ support](https://learn.microsoft.com/en-us/cpp/build/building-on-the-command-line?view=msvc-170#download-and-install-the-tools). Any
+      recent version of Visual Studio itself should work. Use the
+      "Visual Studio Installer" and [modify settings (click for screenshot)](install-screenshot1.png) to selecect at minumum "Desktop development with c++" specifying to [include all of: MSVC v142 (2019), MSVC v143 (2022) plus CLI support (click for screenshot)](install-screenshot2.png). (It should be OK to include later build tools such as VS2026, but VS2019 and VS2022 **must** be present also. 
     * Use the [mcstas-conda](mcstas-conda.bat) batch script to install the latest mcstas from `conda-forge` 
     * Once install has completed, please use the `mcstas-shell` shortcut on the desktop - issue terminal command `mcgui` to start the McStas GUI. 
     * Option 1 *may* function `arm64` Windows, but will require installation of Visual Studio including both arm64 and x64_64 build tools for c++.
   2. **Legacy:**
-    * install the legacy-style MinGW based [McStas 3.5.32 metapackage](https://download.mcstas.org/mcstas-3.5.32/Windows/McStas-Metapackage-3.5.32-win64.exe) - now includes MCPL. 
+    * install the legacy-style MinGW based [McStas 3.6.14 metapackage](https://download.mcstas.org/mcstas-3.6.14/Windows/McStas-Metapackage-3.6.14-win64.exe)
     * Option 2 should be fully functional on `arm64` processors.
   3. **WSL:**
     * Use the directions available in [WSL](WSL/README.md) to install the "Windows subsystem for Linux" and run the Linux Debian binaries there. 

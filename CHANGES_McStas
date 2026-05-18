@@ -58,11 +58,346 @@
 * Modified by: PW February 2025: version 3.5.24
 * Modified by: PW April 2025: version 3.5.27
 * Modified by: PW June 2025: version 3.5.32
+* Modified by: PW December 2025: version 3.6.1
+* Modified by: PW January 2026: version 3.6.5
+* Modified by: PW April 2026: version 3.6.14
 *
-* This file is part of McStas 3.5.32, released April 29th 2025.
+* This file is part of McStas 3.6.14, released April 12th 2026.
 * It gives a 'changes' list from the beginning of the project
 *
 *******************************************************************************/
+Changes in McStas/McXtrace 3.6.14, April 12th, 2026
+## What's Changed
+
+### New comps/instruments
+* Adding the ILL SANS instrument 'SAM' by @nmgm in https://github.com/mccode-dev/McCode/pull/2388
+* Follow-up to https://github.com/mccode-dev/McCode/pull/2387 by @willend in https://github.com/mccode-dev/McCode/pull/2390
+
+### New tool feature: NeXus scans become entries in one common HDF file
+* Prototype solution to allow 'append’ mode for datasets by @willend in https://github.com/mccode-dev/McCode/pull/2376
+
+### Various updates to instruments/components
+* Fix for rare crash of ILL_IN4 / MPI by @willend in https://github.com/mccode-dev/McCode/pull/2287
+* NMO Comp/instr: Header fixes. Plus suppresion of mcdisplay. by @willend in https://github.com/mccode-dev/McCode/pull/2288
+* Add 'full' template in McXtrace and align with McStas version by @willend in https://github.com/mccode-dev/McCode/pull/2290
+* Union mcdisplay bugs by @Lomholy in https://github.com/mccode-dev/McCode/pull/2294
+* Fix to MPI-mode use of Brilliance Transfer calculation. by @willend in https://github.com/mccode-dev/McCode/pull/2300
+* Add McStas unittest for ALLOW_BACKPROP macro. by @willend in https://github.com/mccode-dev/McCode/pull/2302
+* Update Unittest_ALLOW_BACKPROP with per-particle test by @willend in https://github.com/mccode-dev/McCode/pull/2303
+* Make backprop thread safe in McStas by @willend in https://github.com/mccode-dev/McCode/pull/2304
+* Minor instrument and comp updates, McStas by @willend in https://github.com/mccode-dev/McCode/pull/2332
+* More %Example tests for McStas instruments by @willend in https://github.com/mccode-dev/McCode/pull/2333
+* McStas Isotropic_Sqw: fix misplaced MPI_MASTER( … ); brackets by @willend in https://github.com/mccode-dev/McCode/pull/2335
+* Increase McStas Test_SANS stat requirements in selected %Example lines by @willend in https://github.com/mccode-dev/McCode/pull/2336
+* More additions of McStas %Example lines by @willend in https://github.com/mccode-dev/McCode/pull/2337
+* Manual update of McXtrace Incoherent_process comp from EBK branch by @willend in https://github.com/mccode-dev/McCode/pull/2338
+* Add more %Example lines to McStas instruments by @willend in https://github.com/mccode-dev/McCode/pull/2341
+* Lift H22_D1B expectation value by @willend in https://github.com/mccode-dev/McCode/pull/2342
+* Add Test instrument for Be-filter models by @willend in https://github.com/mccode-dev/McCode/pull/2349
+* Disable nightly test of SNS_ARCS instr by @willend in https://github.com/mccode-dev/McCode/pull/2350
+* Add ILL_H142 using ‘simple comps only' by @willend in https://github.com/mccode-dev/McCode/pull/2354
+* Re-enable a few tests on the nightlies by @willend in https://github.com/mccode-dev/McCode/pull/2364
+* Improve final detector stats by 1 order (SPLIT) in SNS_ARCS by @willend in https://github.com/mccode-dev/McCode/pull/2370
+* ESS_butterfly: Wrap all printf / fprintf in MPI_MASTER( ); by @willend in https://github.com/mccode-dev/McCode/pull/2372
+* Updated Rubredoxin lau file from @aaronfinke by @willend in https://github.com/mccode-dev/McCode/pull/2384
+* Updated Example values following updated Rubredoxin.lau by @willend in https://github.com/mccode-dev/McCode/pull/2386
+* Adapt Guide_m interface -> style of Guide_gravity parameters by @willend in https://github.com/mccode-dev/McCode/pull/2389
+* McStas Monitor_nD “nexusbins” only in listmode by @willend in https://github.com/mccode-dev/McCode/pull/2387
+* Adjust %Example line in templateNMX by @willend in https://github.com/mccode-dev/McCode/pull/2397
+* Mono bent complex string parsing by @Lomholy in https://github.com/mccode-dev/McCode/pull/2395
+
+### Tool improvements
+* Use better indentation/formatting in mctest json outputs by @willend in https://github.com/mccode-dev/McCode/pull/2306
+* Prototype clang-format based code-formatting tool by @willend in https://github.com/mccode-dev/McCode/pull/2314
+* Add cppcheck and clang-format to devel dependency list by @willend in https://github.com/mccode-dev/McCode/pull/2322
+* Add hints for alternative mcdisplay visualisation in Jupyter... by @willend in https://github.com/mccode-dev/McCode/pull/2353
+* Add timers for maximal compile / runtime in mctest by @willend in https://github.com/mccode-dev/McCode/pull/2356
+* Add mctest logic to skip / not overwrite existing test data by @willend in https://github.com/mccode-dev/McCode/pull/2358
+* mctest / timeout system - ensure to kill underlying processes by @willend in https://github.com/mccode-dev/McCode/pull/2363
+* mctest: Use process group for more stable hung process cleanup by @willend in https://github.com/mccode-dev/McCode/pull/2365
+* mctest: Even more elaborate process-control / termination logic by @willend in https://github.com/mccode-dev/McCode/pull/2366
+* Tolerate & and # in mcdoc unit specifications by @willend in https://github.com/mccode-dev/McCode/pull/2369
+* mcrun -L list was broken, fixed here by (re-)calculating number of elements … by @willend in https://github.com/mccode-dev/McCode/pull/2377
+* Changed (hard-coded) mcgui 3D visualiser to be webgl-classic by @willend in https://github.com/mccode-dev/McCode/pull/2381
+* On Windows use psutil for probing number of available cores in MPI by @willend in https://github.com/mccode-dev/McCode/pull/2367
+
+### Fixes to various bugs (some for specific issues)
+* Attempt at fixing https://github.com/mccode-dev/McCode/issues/2310 by @willend in https://github.com/mccode-dev/McCode/pull/2311
+* Fix for nasty double-assignment m=m = m, spotted via mcstas-antlr by @willend in https://github.com/mccode-dev/McCode/pull/2355
+* Add ‘allow_backprop’ as _particle member in McXtrace like McStas by @willend in https://github.com/mccode-dev/McCode/pull/2357
+* Patch issue 2359 - Al_window absorption/scattering by @willend in https://github.com/mccode-dev/McCode/pull/2360
+* Phonon focusing fix by @Lomholy in https://github.com/mccode-dev/McCode/pull/2343
+* Remove cogen compiletime warnings by @willend in https://github.com/mccode-dev/McCode/pull/2374
+* Silence warning in case NeXus is built in by @willend in https://github.com/mccode-dev/McCode/pull/2398
+
+### LaTeX in doc headers
+* Use JS LaTeX environments to render equations in headers by @willend in https://github.com/mccode-dev/McCode/pull/2291
+* Update LaTeX formatting for waviness parameter by @willend in https://github.com/mccode-dev/McCode/pull/2293
+
+### Clang-format formatting of component syntax
+* Add comp-formatter to McStas monitors by @willend in https://github.com/mccode-dev/McCode/pull/2315
+* Add comp-formatter to McStas sasmodels comps  by @willend in https://github.com/mccode-dev/McCode/pull/2316
+* Add comp-formatter to McStas samples  by @willend in https://github.com/mccode-dev/McCode/pull/2317
+* Add comp-formatter to McStas optics  by @willend in https://github.com/mccode-dev/McCode/pull/2318
+* Add comp-formatter to McStas contrib  by @willend in https://github.com/mccode-dev/McCode/pull/2319
+* Add comp-formatter to McStas misc  by @willend in https://github.com/mccode-dev/McCode/pull/2321
+* Add comp-formatter to McStas Union  by @willend in https://github.com/mccode-dev/McCode/pull/2320
+* Format McXtrace contrib by @willend in https://github.com/mccode-dev/McCode/pull/2323
+* Format McXtrace astrox by @willend in https://github.com/mccode-dev/McCode/pull/2324
+* Format McXtrace misc by @willend in https://github.com/mccode-dev/McCode/pull/2325
+* Format McXtrace monitors by @willend in https://github.com/mccode-dev/McCode/pull/2326
+* Format McXtrace optics by @willend in https://github.com/mccode-dev/McCode/pull/2327
+* Format McXtrace samples by @willend in https://github.com/mccode-dev/McCode/pull/2328
+* Format McXtrace sasmodels by @willend in https://github.com/mccode-dev/McCode/pull/2329
+* Formatting for McXtrace sources by @willend in https://github.com/mccode-dev/McCode/pull/2330
+* Format McXtrace union by @willend in https://github.com/mccode-dev/McCode/pull/2331
+
+### Project infrastructure
+* Update issue templates by @willend in https://github.com/mccode-dev/McCode/pull/2295
+* Update issue templates by @willend in https://github.com/mccode-dev/McCode/pull/2296
+* Minor work on issue templates by @willend in https://github.com/mccode-dev/McCode/pull/2297
+* Add security issue template and update issue prefixes by @willend in https://github.com/mccode-dev/McCode/pull/2298
+* Adjust remaining conda-based workflows to install/use mamba by @willend in https://github.com/mccode-dev/McCode/pull/2299
+* Tool-only import from branch clangformat-experimental by @willend in https://github.com/mccode-dev/McCode/pull/2312
+* Minor improvements to mccode-clangformat tool + update PR template by @willend in https://github.com/mccode-dev/McCode/pull/2334
+* Workflow and dependency updates  by @willend in https://github.com/mccode-dev/McCode/pull/2362
+* Bump version of actions/setup-python in non-conda workflows by @willend in https://github.com/mccode-dev/McCode/pull/2383
+* Upgrade vite required version by @willend in https://github.com/mccode-dev/McCode/pull/2393
+
+### Various GPU related
+* Disable RITA-II test: hangs GPU box by @willend in https://github.com/mccode-dev/McCode/pull/2339
+* Workaround to run ILL_IN5_Spots correctly on GPU system by @willend in https://github.com/mccode-dev/McCode/pull/2340
+* Disable test - periodically hangs gpu box by @willend in https://github.com/mccode-dev/McCode/pull/2346
+* Configuration update on GPU box by @willend in https://github.com/mccode-dev/McCode/pull/2368
+* Fix typo in GPU box mccode_config by @willend in https://github.com/mccode-dev/McCode/pull/2378
+* Should allow ILL_H15_SAM to execute on GPU/OpenACC by @willend in https://github.com/mccode-dev/McCode/pull/2394
+
+## New Contributors
+* @nmgm made their first contribution in https://github.com/mccode-dev/McCode/pull/2388
+
+**Full Changelog**: https://github.com/mccode-dev/McCode/compare/v3.6.5...v3.6.14
+
+Changes in McStas/McXtrace 3.6.5, January 7th, 2026
+## What's Changed - Main Changes:
+
+### Bugfixes, new features, all common to McStas and McXtrace:
+* macOS bundles in 3.6.1 did not actually install that version but something earlier. Fixed by pinning in yml file, @willend in https://github.com/mccode-dev/McCode/pull/2285
+* PDF manuals had wrong version numbers, @willend in https://github.com/mccode-dev/McCode/pull/2285
+* Allow mcrun / mcdisplay to run / visualize without access to .c/.instr by @willend in https://github.com/mccode-dev/McCode/pull/2281
+* mcgui/mxgui editable font colors, handle long filenames without extreme window resizing by @willend in https://github.com/mccode-dev/McCode/pull/2275
+* Fix cross-platform sort-order issue in PowderN by @willend in https://github.com/mccode-dev/McCode/pull/2272
+* Platform-independent reflection list sort in Single_crystal by @willend in https://github.com/mccode-dev/McCode/pull/2273
+* mcrun/mxrun: feature addition - scan by seed by @willend in https://github.com/mccode-dev/McCode/pull/2276
+* Add mcplot toggle to "plot 1D-curves from 0-value" in linear mode by @willend in https://github.com/mccode-dev/McCode/pull/2278
+* Add commentstring to vim editor by @Lomholy in https://github.com/mccode-dev/McCode/pull/2284
+
+### Other stuff
+* %Example adjustments, McXtrace by @willend in https://github.com/mccode-dev/McCode/pull/2269
+* Test_SANS/Test_SAXS, supplement stats by x10 SPLIT  by @willend in https://github.com/mccode-dev/McCode/pull/2270
+* Use ${{ matrix.mpi }} to ensure different output dirs by @willend in https://github.com/mccode-dev/McCode/pull/2271
+* Fix indentation bug - issue #2279 by @willend in https://github.com/mccode-dev/McCode/pull/2280
+* Temporarily disable this instr from McXtrace tests by @willend in https://github.com/mccode-dev/McCode/pull/2283
+
+**Full Changelog**: https://github.com/mccode-dev/McCode/compare/v3.6.1...v3.6.5
+
+
+Changes in McStas/McXtrace 3.6.1, December 12th, 2025
+## What's Changed - Main Highlights:
+
+### Overall release focus:
+* Code quality improvements: Suppression of warnings from c-compilers and our static code analysis tool `cppcheck`
+* Continuous integration improvement: Any change in instrument/component code is tested via GitHub CI features  
+
+### New tool features / capabilities:
+* `mcrun/mxrun` simulation launch tool: (@willend)
+  * Scans can be parallelised at the "step number" level, use `--scan_split`. Contribution from @Lomholy.
+  * If installed, `cppcheck` can be used to perform static code analysis on the generated code, use `-C/--c-lint?`
+  * Improved string-handling in input parameters, e.g. in use with `NCrystal` config strings. Contribution from @tkittel.
+* `mcplot/mxplot` simulation plot tools: (@willend)
+  * Better support for 'intermediate saves' done via `kill -USR2` or  `Progress_bar`, and plots should work on an unfinished simulation.
+  * Plotting a completed simulation with 'intermediate saves' will give you **latest** plot version in the 2D case and **multiple, overplotted** curves in the 1D case  
+  * The `mcplot-matlab/mxplot-matlab` tool is back. You need to manually install either Matlab or Octave to make use of this
+* `mcdisplay/mxdisplay` instrument visualisation tools: (@willend)
+  * On `conda`-based installations, the `mcdisplay-cad/mxdisplay-cad` tool includes the `cadquery` dependency. On completion of building the model, the OS is asked to handle the resulting CAD model. 
+  * The `mcdisplay-matlab/mxdisplay-matlab` tool is back. You need to manually install either Matlab or Octave to make use of this
+  * For better integration with McStasScript, the `mcdisplay-webgl-classic/mxdisplay-webgl-classic` is used in such scenarios
+  * The 'newer/fancy' `mcdisplay-webgl/mxdisplay-webgl` based on `THREE.js`, `react` and other javascript requires a slightly time-consuming installation process on 1st launch. The user now gets an info box about this.
+  * The McStas-specific `mcdisplay-mantid` IDF generator tool received a bug fix for OFF geometry detectors.
+* `mcdoc/mxdoc` documentation tool: (@willend)
+  * Higher quality / more complete comp/instr doc pages
+* `mctest/mxtest` test tool: (@willend)
+  * Easier to use locally for component/instrument developers  
+
+### Components and instruments:
+#### McXtrace:
+* The `Fluorescence` components have a new flag to enhance statistics/signal from low concentration materials. Work by @farhi.
+#### McStas:
+* The `Union` subsystem now handles 'surface physics'  with the introduction of a system of refraction/reflection processes on geometry surfaces. Work by @mads-bertelsen.
+* The `Union` subsystem now has a functional 3D-mesh system (`Union_mesh`) that supports CAD style geometries. (Ascii/binary STL files and OFF files are supported. - For now only those with triangular meshing.) Work by @Lomholy.
+* As part of the overall code-quality improvement process, various aspects of the `Union` subsystem have been tested / improved / revised. Contributions by @tkittel and @willend in close collaboration with @mads-bertelsen.
+* New ISIS-related instrument files, components and data:
+  * `ISIS_LET` by Ross Stewart and Rob Bewley, serves as test-instrument for `Commodus_I3` (ISIS source model - corresponds to `ViewModISIS` with a different parameter interface)
+  * Updated / larger set of input files for the ISIS moderator components
+  * `Multilayer_sample` from Rob Dalgliesh was updated with `nrepeats` which allows to repeat an SLD material stack. `ISIS_CRISP` was updated to include this feature.
+  * `TOF_PSDmonitor_toQ` is a new component with built-in data reduction from Rob Dalgliesh. Uses ToF to calculate Q. `Test_TOF_PSDmonitor_toQ` is a basic instrument to showcase the component.
+* Several of the basic McStas sample components received a systematic validation against analytical methods, thanks to @Lomholy with help from KU/NBI students.
+* As part of the overall code-quality improvement process, the whole component / instrument base got a BIG overhaul as such (@willend)
+
+### Platform support:
+* The Windows/`conda` platform which uses the `MSVC` compiler is now **fully** functional for all McStas code and a good part of the McXtrace code. As part of this process a new header-file `mccode-complex-lib.h` should be used by all code requiring complex numbers. (Implements functions for e.g. `+-*/` operations across platforms - MSVC does not self implement these operations...) @willend 
+
+
+## What's Changed - Details:
+
+### Common changes to McStas and McXtrace
+
+* Code quality improvements
+  * Remove compiler warnings by @willend in https://github.com/mccode-dev/McCode/pull/2088
+  * Implement 'cppcheck' linting support on Unix, can be utilised via mcrun or mctest by @willend in https://github.com/mccode-dev/McCode/pull/2090
+  * Big overhaul of many component docstings, retire obsoleted components and instruments, component fixes by @willend in https://github.com/mccode-dev/McCode/pull/2117,  https://github.com/mccode-dev/McCode/pull/2118, https://github.com/mccode-dev/McCode/pull/2116,  https://github.com/mccode-dev/McCode/pull/2120, https://github.com/mccode-dev/McCode/pull/2119, https://github.com/mccode-dev/McCode/pull/2115, https://github.com/mccode-dev/McCode/pull/2122, https://github.com/mccode-dev/McCode/pull/2125, https://github.com/mccode-dev/McCode/pull/2144, https://github.com/mccode-dev/McCode/pull/2153, https://github.com/mccode-dev/McCode/pull/2154, https://github.com/mccode-dev/McCode/pull/2156
+  * Linter-oritented fixes in various components by @willend in https://github.com/mccode-dev/McCode/pull/2136, https://github.com/mccode-dev/McCode/pull/2248
+  * Clean up various components / libs where linter output was a bit 'noisy' by @willend in https://github.com/mccode-dev/McCode/pull/2218
+  * Suppres warning from MSVC by using %zi in place of %li by @willend in https://github.com/mccode-dev/McCode/pull/2220
+
+* User gui / command line tools:
+  * mcrun:
+    * Run scan steps in parallel - one scan step pr. one cpu core by @Lomholy in https://github.com/mccode-dev/McCode/pull/2081 (similar to now-deprecated, historical feature of mcrun.pl)
+    * Implement env vars to override mpirun setting by @willend in https://github.com/mccode-dev/McCode/pull/2087 (`MCSTAS_MPIRUN_OVERRIDE` / `MCXTRACE_MPIRUN_OVERRIDE` )
+    * Implement 'cppcheck' linting support on Unix, use `mcrun -C` or mcrun `--c-lint`
+    * Improved error-handling in mccode.py by @willend in https://github.com/mccode-dev/McCode/pull/2139 
+    * Fixes for parameter quoting issues by @tkittel in https://github.com/mccode-dev/McCode/pull/2151
+  * mcgui:
+    * Fixes for parameter quoting issues by @tkittel in https://github.com/mccode-dev/McCode/pull/2151
+  * mcplot:
+    * Use multiple # Data entries in output files if -USR2 is used for intermediate saves by @willend in https://github.com/mccode-dev/McCode/pull/2181
+    * mcplot plot only last # Data block in files with multiple entries by @willend in https://github.com/mccode-dev/McCode/pull/2182
+    * Bring back mcplot-matlab/octave by @willend in https://github.com/mccode-dev/McCode/pull/2256
+    * Correct visualisation artefacts in Matlab/multiline mcdisplay by @willend in https://github.com/mccode-dev/McCode/pull/2257
+  * mcdisplay: 
+    * Let mcdisplay-webgl and -classic honour -d directory by @willend in https://github.com/mccode-dev/McCode/pull/2093
+    * mcdisplay-webgl 1st run notice (wait until node.js install is done) @willend in https://github.com/mccode-dev/McCode/pull/2140
+    * Bring back mcdisplay-matlab/octave by @willend in https://github.com/mccode-dev/McCode/pull/2256
+    * Correct visualisation artefacts in Matlab/multiline mcdisplay by @willend in https://github.com/mccode-dev/McCode/pull/2257
+    * Minor tool improvements: mcdisplay-cad  by @willend in https://github.com/mccode-dev/McCode/pull/2258
+  * mcdoc:
+    * mcdoc is now more tolerant to e.g. missing asterisks in header by @willend in https://github.com/mccode-dev/McCode/pull/2121
+    *  mcdoc fills in "short description" if not found by parsing by @willend in https://github.com/mccode-dev/McCode/pull/2123
+    * Improve clarity  of mcdoc Generate buttion and clipboard by @willend in https://github.com/mccode-dev/McCode/pull/2141
+    * Allow mcdoc to work with --dir .  by @willend in https://github.com/mccode-dev/McCode/pull/2147
+    * Bugfix to filtered search https://github.com/mccode-dev/McCode/pull/2148
+    * Fix mcdoc for single-file search (e.g. BNL_H8.instr)  by @willend in https://github.com/mccode-dev/McCode/pull/2166
+    * Mcdoc patch, tolerate missing ^* in header description / parameters by @willend in https://github.com/mccode-dev/McCode/pull/2179
+  * mctest:
+    * Implement 'cppcheck' linting support on Unix, use `mctest  --lint`
+    * Update mctest with log of attained test value by @willend in https://github.com/mccode-dev/McCode/pull/2161
+    * Add --local=DIR input to mctest, will test instruments from that folder instead of 'system' by @willend in https://github.com/mccode-dev/McCode/pull/2221
+    * Add mctest feature to filter tested instruments by use of given COMP by @willend in https://github.com/mccode-dev/McCode/pull/2236
+* Code generator/Grammar/runtime libs: 
+  * Let `-pygen` generated McStasScript code propose using `mcdisplay-webgl-classic` in Jupyter by @willend in https://github.com/mccode-dev/McCode/pull/2091
+* Common work on McStas / McXtrace components
+  * Include all %{%} section in Arm comp(s) as we propose these as "template" comps by @willend in https://github.com/mccode-dev/McCode/pull/2165
+  * Let random numbers picked in INITIALIZE become controlled by --seed by @willend in https://github.com/mccode-dev/McCode/pull/2227
+
+### McXtrace specific:
+* mcxtrace:Fluorescence: flag enhance low concentrations by @farhi in https://github.com/mccode-dev/McCode/pull/2237
+
+### McStas specific:
+* Sample components, validation-work / alignment with analytical expressions by @Lomholy in:
+  * Phonon_simple by @Lomholy in https://github.com/mccode-dev/McCode/pull/2082 and https://github.com/mccode-dev/McCode/pull/2094,  @willend in https://github.com/mccode-dev/McCode/pull/2195, @mads-bertelsen in https://github.com/mccode-dev/McCode/pull/2215
+  * SANS_Spheres to align with analytical validations. by @Lomholy in https://github.com/mccode-dev/McCode/pull/2083
+  * PowderN, add in order parameter to make it possibly to use no multiple scattering by @Lomholy in https://github.com/mccode-dev/McCode/pull/2098
+  * Single_crystal, added MPI_MASTER to selected printf statements by @aaronfinke in https://github.com/mccode-dev/McCode/pull/2169
+  * KU-SANS-samples, tweak expected values in Test_SANS by @willend in https://github.com/mccode-dev/McCode/pull/2209
+* NCrystal
+  * Fix NCrystal_sample 3D visualisation. by @tkittel in https://github.com/mccode-dev/McCode/pull/2150
+  * Update NCrystal_example.instr to account for, and test, cmdline arg parsing by @tkittel in https://github.com/mccode-dev/McCode/pull/2159
+* Tools/mcdisplay-mantid:
+  * Fix to OFF parsing by @willend in https://github.com/mccode-dev/McCode/pull/2099
+* Optics components
+  * Bugfixes to Monchromator_bent by @Lomholy in https://github.com/mccode-dev/McCode/pull/2103
+  * Make beamstop components SCATTER for nicer visualisation by @tkittel in https://github.com/mccode-dev/McCode/pull/2163
+* Monitor components
+  * Bugfix to NPI_tof_dhkl_detector  after discussion with Jan Saroun by @willend in https://github.com/mccode-dev/McCode/pull/2137 
+ * Union components
+   * Union surface and fix of focus system by @mads-bertelsen in https://github.com/mccode-dev/McCode/pull/2149, https://github.com/mccode-dev/McCode/pull/2203
+     Related bug in Union focusing bug reported by Gilbert Christensen and Dillon Huang KU/NBI.
+   * Add new scattering_process_struct_init function for union processes by @tkittel in https://github.com/mccode-dev/McCode/pull/2177
+   * Followup fix to #2177 with correct order of memset args by @tkittel in https://github.com/mccode-dev/McCode/pull/2196
+   * Off file mesh msvc linter patches by @willend in https://github.com/mccode-dev/McCode/pull/2229
+   * Off file mesh component by @Lomholy in https://github.com/mccode-dev/McCode/pull/2219, https://github.com/mccode-dev/McCode/pull/2249
+   * Support for binary STL also on Windows by @Lomholy in https://github.com/mccode-dev/McCode/pull/2260
+   * Union cleanup before release by @mads-bertelsen in https://github.com/mccode-dev/McCode/pull/2243
+   * Mesh surface compatibility by @mads-bertelsen in https://github.com/mccode-dev/McCode/pull/2251
+   * Fix union lib surface stack by @willend in https://github.com/mccode-dev/McCode/pull/2253
+   * Removing debug prints from Sphere and 3D logger in Union. by @mads-bertelsen in https://github.com/mccode-dev/McCode/pull/2252
+ * New comps and instruments 
+   * Comp updates etc from ISIS by @willend in https://github.com/mccode-dev/McCode/pull/2190
+ 
+* Developer tools / User contribution tools
+  * Script for flexible+convenient creation of .yml files by @tkittel in https://github.com/mccode-dev/McCode/pull/2105
+  * New test/devel tool to build McCode in a conda env by @willend in https://github.com/mccode-dev/McCode/pull/2106, https://github.com/mccode-dev/McCode/pull/2160, @tkittel in https://github.com/mccode-dev/McCode/pull/2155, 
+  * New PR template by @willend in https://github.com/mccode-dev/McCode/pull/2129, https://github.com/mccode-dev/McCode/pull/2130, https://github.com/mccode-dev/McCode/pull/2131, https://github.com/mccode-dev/McCode/pull/2132, https://github.com/mccode-dev/McCode/pull/2133, https://github.com/mccode-dev/McCode/pull/2134, https://github.com/mccode-dev/McCode/pull/2138, @tkittel in https://github.com/mccode-dev/McCode/pull/2176
+
+### Behind the scenes:
+
+* Deployment and CI
+  * The 'autobuild' workflows automatically build non-conda packages for McStas and McXtrace on any new release tag by @willend in https://github.com/mccode-dev/McCode/pull/2079
+  * Automated testing of modified instrs/comps by @willend in https://github.com/mccode-dev/McCode/pull/2100, https://github.com/mccode-dev/McCode/pull/2101, https://github.com/mccode-dev/McCode/pull/2102
+  * Nightly tests based on conda by @willend in https://github.com/mccode-dev/McCode/pull/2106
+  * CI: Run "full test" in case 20 or more comps/instrs have been changed. by @willend in https://github.com/mccode-dev/McCode/pull/2126
+  * Transition to conda-based basictests for Windows and macOS by @willend in https://github.com/mccode-dev/McCode/pull/2191
+  * Handle case with single modified comp (and no matching instr) better by @willend in https://github.com/mccode-dev/McCode/pull/2197
+  * Minor ci change: Avoid running duplicate version of same instr by @willend in https://github.com/mccode-dev/McCode/pull/2223
+  * Deploy --comp=COMP filter to test instruments including changed components by @willend in https://github.com/mccode-dev/McCode/pull/2238
+
+
+* Platform support
+  * Windows + Conda, update install-docs (#2245, thanks @LelandWH) by @willend in https://github.com/mccode-dev/McCode/pull/2246
+  * Complex number support on Windows with MSVC  (#2192 complex numbers) by @willend in https://github.com/mccode-dev/McCode/pull/2205,  https://github.com/mccode-dev/McCode/pull/2207, SANSPDB/SAXSPDB only by @willend in https://github.com/mccode-dev/McCode/pull/2208, https://github.com/mccode-dev/McCode/pull/2210 and Update headers in complex-lib by @willend in https://github.com/mccode-dev/McCode/pull/2216
+  * Fix for ppc64 Linux (conda-forge platform for IBM Power systems) by @willend in https://github.com/mccode-dev/McCode/pull/2085
+  * Win32 "define-massage" to ensure proper execution with recent MinGW releases by @willend in https://github.com/mccode-dev/McCode/pull/2135
+  * Remove duplicate rpaths on macOS by @willend in https://github.com/mccode-dev/McCode/pull/2140
+  * Add grep in "monolithic" windows builds by @willend in https://github.com/mccode-dev/McCode/pull/2152
+  * Qt message box for error message by @willend in https://github.com/mccode-dev/McCode/pull/2164
+  * -DUSE_NEXUS defines were missing for Windows / NeXus by @willend in https://github.com/mccode-dev/McCode/pull/2167
+  * Consolidate micromamba bulky installers by @willend in https://github.com/mccode-dev/McCode/pull/2183
+  * Fixes for mctest windows nexus: Should now function with .h5 output by @willend in https://github.com/mccode-dev/McCode/pull/2206
+
+
+* General maintenance
+   * Minor fixes, contributions from Daniel Lomholt by @willend in https://github.com/mccode-dev/McCode/pull/2108 
+   * Fix header typo by @willend in https://github.com/mccode-dev/McCode/pull/2109
+   * GPU-related edits for V Transmission_V_polarisator.comp and Test_StatisticalChopper.instr by @willend in https://github.com/mccode-dev/McCode/pull/2110
+   * If running under conda, add env prefix when saving/loading user mccode_config by @willend in https://github.com/mccode-dev/McCode/pull/2142
+   * Temporarily, avoid deploying xraylib via brew on macOS 15 by @willend in https://github.com/mccode-dev/McCode/pull/2145, https://github.com/mccode-dev/McCode/pull/2146
+   * Fix SDKROOT assignment for macOS configuration by @willend in https://github.com/mccode-dev/McCode/pull/2157
+   * Fix to autobuild scripts, remove v from tag... by @willend in https://github.com/mccode-dev/McCode/pull/2170
+   * Drop xrl-based test on macOS (we should use conda instead) by @willend in https://github.com/mccode-dev/McCode/pull/2180
+   * Remove mcplot-html dep python3-pyqt5.qtsvg to get python3-pyqt6.qtsvg by @willend in https://github.com/mccode-dev/McCode/pull/2184
+   * Suppress superfluous debug string in mctest by @willend in https://github.com/mccode-dev/McCode/pull/2185
+   * Temporarily disable test McXtrace randvec_target_rect by @willend in https://github.com/mccode-dev/McCode/pull/2186
+   * Beef up statistics 20 fold on Test_RNG instruments by @willend in https://github.com/mccode-dev/McCode/pull/2187
+   * Drop macOS 13 which will soon be deprecated by @willend in https://github.com/mccode-dev/McCode/pull/2189
+   * Partial revert on macOS bundle injector  by @willend in https://github.com/mccode-dev/McCode/pull/2193
+   * Adjustment of %Example values that were off for the nightly test scenarios by @willend in https://github.com/mccode-dev/McCode/pull/2194
+   * Use rglob in cleanfiles tool, rmtree in case of out.dsym by @willend in https://github.com/mccode-dev/McCode/pull/2211
+   * Clean simdirs by @willend in https://github.com/mccode-dev/McCode/pull/2212
+   * Update workflows to use same simdir cleanup strategy everywhere by @willend in https://github.com/mccode-dev/McCode/pull/2213
+   * Various work on CI output and platforms by @willend in https://github.com/mccode-dev/McCode/pull/2217
+   * GPU box update by @willend in https://github.com/mccode-dev/McCode/pull/2233
+   * Recent linter patches require corrections for GPU/OpenACC... by @willend in https://github.com/mccode-dev/McCode/pull/2235
+   * Deprecate unused features of 'mctest' by @willend in https://github.com/mccode-dev/McCode/pull/2239
+   * Add timestamp to 'testroot' folder to avoid double-layer file structure by @willend in https://github.com/mccode-dev/McCode/pull/2241
+   * Restore ability to "run version via config file" in mctest by @willend in https://github.com/mccode-dev/McCode/pull/2244
+   * Preparations 3.6 by @willend in https://github.com/mccode-dev/McCode/pull/2254
+
+
+## New Contributors
+* @aaronfinke made their first contribution in https://github.com/mccode-dev/McCode/pull/2169
+
+**Full Changelog**: https://github.com/mccode-dev/McCode/compare/v3.5.32...v3.6.1
+
+
 Changes in McStas/McXtrace 3.5.32, June 17th, 2025
 ## What's Changed
 ### Common changes to McStas and McXtrace

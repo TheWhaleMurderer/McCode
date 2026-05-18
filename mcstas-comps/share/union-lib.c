@@ -25,6 +25,7 @@ enum shape {
 };
 
 enum process {
+  Inhomogenous_incoherent,
   Incoherent,
   Powder,
   Single_crystal,
@@ -33,7 +34,18 @@ enum process {
   Texture,
   IncoherentPhonon,
   NCrystal,
+  Non,
   Template
+};
+
+enum surface {
+  Mirror,
+  SurfaceTemplate  	
+};
+
+enum in_or_out {
+	inward_bound,
+	outward_bound
 };
 
 struct intersection_time_table_struct {
@@ -41,11 +53,13 @@ int num_volumes;
 int *calculated;
 int *n_elements;
 double **intersection_times;
+double **normal_vector_x;
+double **normal_vector_y;
+double **normal_vector_z;
+int **surface_index;
 };
 
 struct line_segment{
-//struct position point1;
-//struct position point2;
 Coords point1;
 Coords point2;
 int number_of_dashes;
@@ -75,12 +89,6 @@ struct line_segment *lines;
 #pragma acc shape(lines[0:number_of_lines]) init_needed(number_of_lines)
 };
 
-// 2D lists not needed anyway
-// struct pointer_to_2d_int_list {
-// int n_lists;
-// struct pointer_to_1d_int_list *lists;
-// }
-
 // Todo: see if the union geometry_parameter_union and other geometry structs can be here
 union geometry_parameter_union{
     struct sphere_storage   *p_sphere_storage;
@@ -99,7 +107,8 @@ double z;
 };
 
 struct focus_data_struct {
-Coords Aim;
+Coords RayAim; // Vector from ray position (within geometry) to target
+Coords Aim; // Vector from geometry to target
 double angular_focus_width;
 double angular_focus_height;
 double spatial_focus_width;
@@ -192,24 +201,24 @@ struct logger_pointer_set_struct {
   // The logger has two record functions, an active and an inactive. Normally the active one will be to permanent storage,
   //  but if a conditional has been defined, it can switch the two, making the active one recording to temporary, which
   //  can then be filtered based on the future path of the ray
-  
+
   // function input Coords position, k[3], k_old[3], p, p_old, NV, NPV, N, logger_data_union, logger_with_data_struct
   void (*active_record_function)(Coords*, double*, double*, double, double, double, int, int, int, struct logger_struct*, struct logger_with_data_struct*);
   void (*inactive_record_function)(Coords*, double*, double*, double, double, double, int, int, int, struct logger_struct*, struct logger_with_data_struct*);
-  
+
   // A clear temporary data function (for new ray)
   void (*clear_temp)(union logger_data_union*);
-  
+
   // Write temporary to permanent is used when the record to temp function is active, and the condition is met.
   void (*temp_to_perm)(union logger_data_union*);
-  
+
   // Write temporary final_p to permanent is used when the record to temp function is active, and the condition is met
   //  and the final weight is given to be used for all stored events in the logger.
   void (*temp_to_perm_final_p)(union logger_data_union*, double);
-  
+
   // Select which temp_to_perm function to use
   int select_t_to_p; // 1: temp_to_perm, 2: temp_to_perm_final_p
-  
+
 };
 
 union abs_logger_data_union{
@@ -234,24 +243,24 @@ struct abs_logger_pointer_set_struct {
   // The logger has two record functions, an active and an inactive. Normally the active one will be to permanent storage,
   //  but if a conditional has been defined, it can switch the two, making the active one recording to temporary, which
   //  can then be filtered based on the future path of the ray
-  
+
   // function input Coords position, k[3], p, NV, N, logger_data_union, logger_with_data_struct
   void (*active_record_function)(Coords*, double*, double,  double, int, int, struct abs_logger_struct*, struct abs_logger_with_data_struct*);
   void (*inactive_record_function)(Coords*, double*, double,  double, int, int, struct abs_logger_struct*, struct abs_logger_with_data_struct*);
-  
+
   // A clear temporary data function (for new ray)
   void (*clear_temp)(union abs_logger_data_union*);
-  
+
   // Write temporary to permanent is used when the record to temp function is active, and the condition is met.
   void (*temp_to_perm)(union abs_logger_data_union*);
-  
+
   // Write temporary final_p to permanent is used when the record to temp function is active, and the condition is met
   //  and the final weight is given to be used for all stored events in the logger.
   void (*temp_to_perm_final_p)(union abs_logger_data_union*, double);
-  
+
   // Select which temp_to_perm function to use
   //int select_t_to_p; // 1: temp_to_perm, 2: temp_to_perm_final_p
-  
+
 };
 
 
@@ -260,19 +269,19 @@ struct conditional_standard_struct{
   double Emax;
   double Emin;
   int E_limit;
-  
+
   double Tmin;
   double Tmax;
   int T_limit;
-  
+
   int volume_index;
-  
+
   double Total_scat_max;
   double Total_scat_min;
   int Total_scat_limit;
-  
+
   double exit_volume_index;
-  
+
   // Test
   Coords test_position;
   Rotation test_rotation;
@@ -282,11 +291,11 @@ struct conditional_standard_struct{
 struct conditional_PSD_struct{
   double PSD_half_xwidth;
   double PSD_half_yheight;
-  
+
   double Tmin;
   double Tmax;
   int T_limit;
-  
+
   // Position of the PSD
   Coords PSD_position;
   Rotation PSD_rotation;
@@ -306,7 +315,7 @@ typedef int (*conditional_function_pointer)(union conditional_data_union*,Coords
 
 struct conditional_list_struct{
   int num_elements;
-  
+
   union conditional_data_union **p_data_unions;
   conditional_function_pointer *conditional_functions;
   //int (**conditional_functions)(Coords*, Coords*, double*, double*, int*, int*, int**);
@@ -318,9 +327,9 @@ struct logger_struct {
   struct logger_pointer_set_struct function_pointers;
   // Contains hard copy of logger_data_union since the size is the same as a pointer.
   union logger_data_union data_union;
-  
+
   int logger_extend_index; // Contain index conditional_extend_array defined in master that can be acsessed from extend section.
-  
+
   struct conditional_list_struct conditional_list;
 };
 
@@ -341,18 +350,11 @@ struct loggers_struct {
 
 struct abs_logger_struct {
   char name[256];
-  // Contains ponters to all the functions assosiated with this logger
+  // Contains pointers to all the functions assosiated with this logger
   struct abs_logger_pointer_set_struct function_pointers;
   // Contains hard copy of logger_data_union since the size is the same as a pointer.
   union abs_logger_data_union data_union;
-  
-  // Position and rotation of the abs_logger
-  Coords position;
-  Rotation rotation;
-  Rotation t_rotation;
-  
   int abs_logger_extend_index; // Contain index conditional_extend_array defined in master that can be acsessed from extend section.
-  
   struct conditional_list_struct conditional_list;
 };
 
@@ -394,19 +396,18 @@ int is_mask_volume; // 1 if volume itself is a mask (masking the ones in it's ma
 int mask_index;
 int is_masked_volume; // 1 if this volume is being masked by another volume, the volumes that mask it is in masked_by_list
 int mask_mode; // ALL/ANY 1/2. In ALL mode, only parts covered by all masks is simulated, in ANY mode, area covered by just one mask is simulated
+int skip_hierarchy_optimization;
 double geometry_p_interact; // fraction of rays that interact with this volume for each scattering (between 0 and 1, 0 for disable)
 union geometry_parameter_union geometry_parameters; // relevant parameters for this shape
 union geometry_parameter_union (*copy_geometry_parameters)(union geometry_parameter_union*);
-struct focus_data_struct focus_data; // Used for focusing from this geometry
 
-// New focus data implementation to remove the focusing bug for non-isotripic processes
-struct focus_data_array_struct focus_data_array;
+struct focus_data_array_struct focus_data_array; // Focusing specified by user is element 0 and used for isotropic processes, rotated versions are added by master
 struct pointer_to_1d_int_list focus_array_indices; // Add 1D integer array with indecies for correct focus_data for each process
 
 
 // intersect_function takes position/velocity of ray and parameters, returns time list
-int (*intersect_function)(double*,int*,double*,double*,struct geometry_struct*);
-//                        t_array,n_ar,r      ,v
+int (*intersect_function)(double*, double*, double*, double*, int*, int*, double*, double*, struct geometry_struct*);
+//                        t_array, nx array, ny array, nz array, surface_index array, n arary, r ,v
 
 // within_function that checks if the ray origin is within this volume
 int (*within_function)(Coords,struct geometry_struct*);
@@ -445,6 +446,13 @@ struct pointer_to_1d_int_list masked_by_mask_index_list;
 //struct indexed_mask_lists_struct mask_intersect_lists;
 // Simpler way of storing the mask_intersect_lists
 struct pointer_to_1d_int_list mask_intersect_list;
+
+// Surfaces
+// Could make structure for this and support functions?
+int number_of_faces;
+struct surface_stack_struct **surface_stack_for_each_face;
+struct surface_stack_struct *internal_cut_surface_stack;
+
 };
 
 struct physics_struct
@@ -452,14 +460,29 @@ struct physics_struct
 char name[256]; // User defined material name
 int interact_control;
 int is_vacuum;
+int any_process_needs_cross_section_focus;
 double my_a;
 int number_of_processes;
 // pointer to array of pointers to physics_sub structures that each describe a scattering process
 struct scattering_process_struct *p_scattering_array;
+
+// refraction related
+int has_refraction_info;
+double refraction_scattering_length_density; // [AA^-2]
+double refraction_Qc;
+
+// Numerical integration
+int sampling_points;
+double *cumul_transmission_prob;
+double dist;
+double *cumul_dists;
+double **mus;
+double *total_mus;
 };
 
 union data_transfer_union{
     // List of pointers to storage structs for all supported physical processes
+    struct Inhomogenous_incoherent_struct *Inhomogenous_incoherent_struct;
     struct Incoherent_physics_storage_struct  *pointer_to_a_Incoherent_physics_storage_struct;
     struct Powder_physics_storage_struct *pointer_to_a_Powder_physics_storage_struct;
     struct Single_crystal_physics_storage_struct *pointer_to_a_Single_crystal_physics_storage_struct;
@@ -477,24 +500,65 @@ union data_transfer_union{
 };
 
 
-
 struct scattering_process_struct
 {
-char name[256];                // User defined process name
-enum process eProcess;         // enum value corresponding to this process GPU
-double process_p_interact;     // double between 0 and 1 that describes the fraction of events forced to undergo this process. -1 for disable
-int non_isotropic_rot_index;   // -1 if process is isotrpic, otherwise is the index of the process rotation matrix in the volume
-Rotation rotation_matrix;      // rotation matrix of process, reported by component in local frame, transformed and moved to volume struct in main
+  char name[256];                          // User defined process name
+  enum process eProcess;                   // enum value corresponding to this process GPU
+  double process_p_interact;               // double between 0 and 1 that describes the fraction of events forced to undergo this process. -1 for disable
+  int non_isotropic_rot_index;             // -1 if process is isotrpic, otherwise is the index of the process rotation matrix in the volume
+  int needs_cross_section_focus;           // 1 if physics_my needs to call focus functions, otherwise -1
+  int needs_numerical_integration;         // 1 if the process is inhomogenous and therefore needs numerical integration, otherwise -1.
+  Rotation rotation_matrix;                // rotation matrix of process, reported by component in local frame, transformed and moved to volume struct in main
+  double *inhomogenous_cumul_prob;         // The cumulative probability of a process in case of inhomogenous processes
+  double *inhomogenous_distances;          // The distance of each step in which the cumulative probabilities will be calculated.
+  double *inhomogenous_cumul_distances;    // The cumulative distances
+  double *inhomogenous_mu;                 // The different attenuation coefficients that are sampled in the numerical integration
+  double *inhomogenous_prob;               // The probability of the process at the different sampled points.
+  double *inhomogenous_t;                  // The different times at which mu must be sampled.
+  int sampling_points;                          // Maximum number of samplings performed. If it is -1, no sampling has been done, and the arrays must be malloc'ed.
+  union data_transfer_union data_transfer; // The way to reach the storage space allocated for this process (see examples in process.comp files)
 
-union data_transfer_union data_transfer; // The way to reach the storage space allocated for this process (see examples in process.comp files)
+  // probability_for_scattering_functions calculates this probability given k_i and parameters
+  int (*probability_for_scattering_function)(double *, double *, union data_transfer_union, struct focus_data_struct *, _class_particle *_particle);
+  //                                         prop,   k_i,   ,parameters               , focus data / function
 
-// probability_for_scattering_functions calculates this probability given k_i and parameters
-int (*probability_for_scattering_function)(double*,double*,union data_transfer_union,struct focus_data_struct*, _class_particle *_particle);
-//                                         prop,   k_i,   ,parameters               , focus data / function
+  // A scattering_function takes k_i and parameters, returns k_f
+  int (*scattering_function)(double *, double *, double *, union data_transfer_union, struct focus_data_struct *, _class_particle *_particle);
+  //                         k_f,    k_i,    weight, parameters               , focus data / function
+};
 
-// A scattering_function takes k_i and parameters, returns k_f
-int (*scattering_function)(double*,double*,double*,union data_transfer_union,struct focus_data_struct*, _class_particle *_particle);
-//                         k_f,    k_i,    weight, parameters               , focus data / function
+// Utility function for initialising a scattering_process_struct with default
+// values:
+void scattering_process_struct_init(struct scattering_process_struct *sps)
+{
+  memset(sps, 0, sizeof(struct scattering_process_struct)); // catch all
+  sps->name[0] = '\0';
+  sps->probability_for_scattering_function = NULL;
+  sps->scattering_function = NULL;
+  sps->non_isotropic_rot_index = -1;
+  sps->needs_cross_section_focus = -1;
+  sps->needs_numerical_integration = -1;
+  sps->sampling_points = -1;
+}
+
+
+union surface_data_transfer_union 
+{
+	struct Mirror_surface_storage_struct *pointer_to_a_Mirror_surface_storage_struct;
+	struct Template_surface_storage_struct *pointer_to_a_Template_surface_storage_struct;	
+};
+
+struct surface_process_struct
+{
+char name[256];
+enum surface eSurface;
+union surface_data_transfer_union data_transfer;
+};
+
+struct surface_stack_struct
+{
+int number_of_surfaces;
+struct surface_process_struct **p_surface_array;
 };
 
 struct Volume_struct
@@ -527,9 +591,22 @@ int num_elements;
 Rotation **rotations;
 };
 
+struct global_surface_element_struct
+{
+char name[256]; // Name of the process
+int component_index;
+struct surface_process_struct *p_surface_process;
+};
+
+struct pointer_to_global_surface_list 
+{
+int num_elements;
+struct global_surface_element_struct *elements;
+};
+
 struct global_process_element_struct
 {
-char name[128]; // Name of the process
+char name[256]; // Name of the process
 int component_index;
 struct scattering_process_struct *p_scattering_process;
 };
@@ -615,6 +692,10 @@ struct global_master_element_struct *elements;
 };
 
 
+void geometry_struct_init(struct geometry_struct *geometry){
+  memset(geometry, 0, sizeof(struct geometry_struct));
+  geometry->skip_hierarchy_optimization = 0;
+}
 // -------------    Physics functions   ---------------------------------------------------------
 
 //#include "Test_physics.c"
@@ -639,7 +720,7 @@ double length_of_position_vector(Coords point) {
 
 Coords make_position(double *r) {
     Coords temp;
-    
+
     temp.x = r[0];temp.y = r[1];temp.z = r[2];
     return temp;
 };
@@ -658,7 +739,7 @@ int sum_int_list(struct pointer_to_1d_int_list list) {
     for (iterate = 0;iterate < list.num_elements;iterate++) sum += list.elements[iterate];
     return sum;
     };
-    
+
 int on_int_list(struct pointer_to_1d_int_list list,int target) {
     int iterate,output=0;
     for (iterate = 0; iterate<list.num_elements ;iterate++) {
@@ -674,7 +755,7 @@ int find_on_int_list(struct pointer_to_1d_int_list list,int target) {
     }
     return -1;
     };
-    
+
 void on_both_int_lists(struct pointer_to_1d_int_list *list1, struct pointer_to_1d_int_list *list2, struct pointer_to_1d_int_list *common) {
     // Assume common.elements is allocated to a number of int's large enough to hold the resulting list
     int iterate,used_elements=0;
@@ -687,7 +768,7 @@ void on_both_int_lists(struct pointer_to_1d_int_list *list1, struct pointer_to_1
 void remove_element_in_list_by_index(struct pointer_to_1d_int_list *list,int index) {
     if (index >= list->num_elements) {
       printf("ERROR(remove_element_in_list_by_index): trying to remove an index that wasn't allocated to begin with");
-      exit(1);
+      exit(EXIT_FAILURE);
     }
     else {
         int iterate;
@@ -698,27 +779,39 @@ void remove_element_in_list_by_index(struct pointer_to_1d_int_list *list,int ind
         list->num_elements--;
         //if (list->num_elements==0) printf("Making empty list!\n");
         temp = malloc(list->num_elements * sizeof(int));
+	if (!temp) {
+	  fprintf(stderr,"Failure allocating list in Union function remove_element_in_list_by_index 1/2 - Exit!\n");
+	  exit(EXIT_FAILURE);
+	}
         for (iterate = 0;iterate < list->num_elements;iterate++) temp[iterate] = list->elements[iterate];
         free(list->elements);
         list->elements = malloc(list->num_elements * sizeof(int));
+	if (!list->elements) {
+	  fprintf(stderr,"Failure allocating list in Union function remove_element_in_list_by_index 2/2 - Exit!\n");
+	  exit(EXIT_FAILURE);
+	}
         for (iterate = 0;iterate < list->num_elements;iterate++) list->elements[iterate] = temp[iterate];
         free(temp);
 
     }
     };
-    
+
 void remove_element_in_list_by_value(struct pointer_to_1d_int_list *list,int value) {
     int iterate;
     for (iterate = 0;iterate < list->num_elements;iterate++) {
         if (list->elements[iterate] == value) remove_element_in_list_by_index(list,iterate);
     }
     };
-    
+
 void merge_lists(struct pointer_to_1d_int_list *result,struct pointer_to_1d_int_list *list1,struct pointer_to_1d_int_list *list2) {
     if (result->num_elements > 0) free(result->elements);
     result->num_elements = list1->num_elements + list2->num_elements;
     if (result->num_elements != 0) {
       result->elements = malloc(result->num_elements*sizeof(int));
+      if (!result->elements) {
+	fprintf(stderr,"Failure allocating list in Union function merge_lists- Exit!\n");
+	  exit(EXIT_FAILURE);
+      }
       int iterate;
       for (iterate = 0;iterate < list1->num_elements;iterate++)
           result->elements[iterate] = list1->elements[iterate];
@@ -731,14 +824,26 @@ void add_element_to_double_list(struct pointer_to_1d_double_list *list,double va
     if (list->num_elements == 0) {
       list->num_elements++;
       list-> elements = malloc(list->num_elements*sizeof(double));
+      if (!list->elements) {
+	fprintf(stderr,"Failure allocating list in Union function add_element_to_double_list 1/3 - Exit!\n");
+	  exit(EXIT_FAILURE);
+      }
       list-> elements[0] = value;
     } else {
       double *temp=malloc(list->num_elements*sizeof(double));
+      if (!temp) {
+	fprintf(stderr,"Failure allocating list in Union function add_element_to_double_list 2/3 - Exit!\n");
+	  exit(EXIT_FAILURE);
+      }
       int iterate;
       for (iterate=0;iterate<list->num_elements;iterate++) temp[iterate] = list->elements[iterate];
       free(list->elements);
       list->num_elements++;
       list-> elements = malloc(list->num_elements*sizeof(double));
+      if (!list->elements) {
+	fprintf(stderr,"Failure allocating list in Union function add_element_to_double_list 3/3 - Exit!\n");
+	exit(EXIT_FAILURE);
+      }
       for (iterate=0;iterate<list->num_elements-1;iterate++) list->elements[iterate] = temp[iterate];
       free(temp);
       list->elements[list->num_elements-1] = value;
@@ -749,14 +854,26 @@ void add_element_to_int_list(struct pointer_to_1d_int_list *list,int value) {
     if (list->num_elements == 0) {
       list->num_elements++;
       list-> elements = malloc(list->num_elements*sizeof(int));
+      if (!list->elements) {
+	fprintf(stderr,"Failure allocating list in Union function add_element_to_int_list 1/3 - Exit!\n");
+	exit(EXIT_FAILURE);
+      }
       list-> elements[0] = value;
     } else {
       double *temp=malloc(list->num_elements*sizeof(double));
+      if (!temp) {
+	fprintf(stderr,"Failure allocating list in Union function add_element_to_int_list 2/3 - Exit!\n");
+	exit(EXIT_FAILURE);
+      }
       int iterate;
       for (iterate=0;iterate<list->num_elements;iterate++) temp[iterate] = list->elements[iterate];
       free(list->elements);
       list->num_elements++;
       list-> elements = malloc(list->num_elements*sizeof(int));
+      if (!list->elements) {
+	fprintf(stderr,"Failure allocating list in Union function add_element_to_int_list 3/3 - Exit!\n");
+	exit(EXIT_FAILURE);
+      }
       for (iterate=0;iterate<list->num_elements-1;iterate++) list->elements[iterate] = temp[iterate];
       free(temp);
       list->elements[list->num_elements-1] = value;
@@ -767,20 +884,50 @@ void add_element_to_int_list(struct pointer_to_1d_int_list *list,int value) {
 void add_element_to_focus_data_array(struct focus_data_array_struct *focus_data_array,struct focus_data_struct focus_data) {
     if (focus_data_array->num_elements == 0) {
       focus_data_array->num_elements++;
-      focus_data_array-> elements = malloc(focus_data_array->num_elements*sizeof(struct focus_data_struct));
-      focus_data_array-> elements[0] = focus_data;
+      focus_data_array->elements = malloc(focus_data_array->num_elements*sizeof(struct focus_data_struct));
+      if (!focus_data_array->elements) {
+	fprintf(stderr,"Failure allocating list in Union function add_element_to_focus_data_array 1/3- Exit!\n");
+	exit(EXIT_FAILURE);
+      }
+      focus_data_array->elements[0] = focus_data;
     } else {
       struct focus_data_struct *temp=malloc(focus_data_array->num_elements*sizeof(struct focus_data_struct));
+      if (!temp) {
+	fprintf(stderr,"Failure allocating list in Union function add_element_to_focus_data_array 2/3- Exit!\n");
+	exit(EXIT_FAILURE);
+      }
       int iterate;
       for (iterate=0;iterate<focus_data_array->num_elements;iterate++) temp[iterate] = focus_data_array->elements[iterate];
       free(focus_data_array->elements);
       focus_data_array->num_elements++;
       focus_data_array-> elements = malloc(focus_data_array->num_elements*sizeof(struct focus_data_struct));
+      if (!focus_data_array->elements) {
+	fprintf(stderr,"Failure allocating list in Union function add_element_to_focus_data_array 3/3- Exit!\n");
+	exit(EXIT_FAILURE);
+      }
       for (iterate=0;iterate<focus_data_array->num_elements-1;iterate++) focus_data_array->elements[iterate] = temp[iterate];
       free(temp);
       focus_data_array->elements[focus_data_array->num_elements-1] = focus_data;
     }
     };
+	
+void copy_focus_data_array(struct focus_data_array_struct *original_array, struct focus_data_array_struct *new_array) {
+	
+	new_array->num_elements = original_array->num_elements;
+	new_array->elements = malloc(new_array->num_elements*sizeof(struct focus_data_struct));
+
+	if (new_array->elements == NULL) {
+		fprintf(stderr, "Memory allocation failed in copy_focus_data_struct \n");
+		exit(EXIT_FAILURE);
+	}
+		
+	int iterate;
+	for (iterate=0;iterate<original_array->num_elements;iterate++) {
+		new_array->elements[iterate] = original_array->elements[iterate];
+	}
+
+	};
+
 
 
 void add_to_logger_with_data(struct logger_with_data_struct *logger_with_data, struct logger_struct *logger) {
@@ -788,11 +935,19 @@ void add_to_logger_with_data(struct logger_with_data_struct *logger_with_data, s
     if (logger_with_data->allocated_elements == 0) {
         logger_with_data->allocated_elements = 5;
         logger_with_data->logger_pointers = malloc(logger_with_data->allocated_elements*sizeof(struct logger_struct*));
+	if (!logger_with_data->logger_pointers) {
+	  fprintf(stderr,"Failure allocating list in Union function add_to_logger_with_data 1/3- Exit!\n");
+	  exit(EXIT_FAILURE);
+	}
         logger_with_data->used_elements = 1;
         logger_with_data->logger_pointers[0] = logger;
     } else if (logger_with_data->used_elements > logger_with_data->allocated_elements-1) {
         struct logger_with_data_struct temp_logger_with_data;
         temp_logger_with_data.logger_pointers = malloc((logger_with_data->used_elements)*sizeof(struct logger_struct*));
+	if (!temp_logger_with_data.logger_pointers) {
+	  fprintf(stderr,"Failure allocating list in Union function add_to_logger_with_data 2/3- Exit!\n");
+	  exit(EXIT_FAILURE);
+	}
         int iterate;
         for (iterate=0;iterate<logger_with_data->used_elements;iterate++) {
             temp_logger_with_data.logger_pointers[iterate]  = logger_with_data->logger_pointers[iterate];
@@ -800,17 +955,23 @@ void add_to_logger_with_data(struct logger_with_data_struct *logger_with_data, s
         free(logger_with_data->logger_pointers);
         logger_with_data->allocated_elements = logger_with_data->allocated_elements+5;
         logger_with_data->logger_pointers = malloc(logger_with_data->allocated_elements*sizeof(struct logger_struct*));
+	if (!logger_with_data->logger_pointers) {
+	  fprintf(stderr,"Failure allocating list in Union function add_to_logger_with_data 3/3- Exit!\n");
+	  exit(EXIT_FAILURE);
+	}
         for (iterate=0;iterate<logger_with_data->used_elements;iterate++) {
             logger_with_data->logger_pointers[iterate]  = temp_logger_with_data.logger_pointers[iterate];
         }
 
         logger_with_data->logger_pointers[logger_with_data->used_elements++] = logger;
-        
-        
+
+	// Clear up temporary memory
+	free(temp_logger_with_data.logger_pointers);
+
     } else {
         logger_with_data->logger_pointers[logger_with_data->used_elements++] = logger;
     }
-    
+
 };
 
 void add_to_abs_logger_with_data(struct abs_logger_with_data_struct *abs_logger_with_data, struct abs_logger_struct *abs_logger) {
@@ -818,11 +979,19 @@ void add_to_abs_logger_with_data(struct abs_logger_with_data_struct *abs_logger_
     if (abs_logger_with_data->allocated_elements == 0) {
         abs_logger_with_data->allocated_elements = 5;
         abs_logger_with_data->abs_logger_pointers = malloc(abs_logger_with_data->allocated_elements*sizeof(struct abs_logger_struct*));
+	if (!abs_logger_with_data->abs_logger_pointers) {
+	  fprintf(stderr,"Failure allocating list in Union function add_to_abs_logger_with_data 1/3- Exit!\n");
+	  exit(EXIT_FAILURE);
+	}
         abs_logger_with_data->used_elements = 1;
         abs_logger_with_data->abs_logger_pointers[0] = abs_logger;
     } else if (abs_logger_with_data->used_elements > abs_logger_with_data->allocated_elements-1) {
         struct abs_logger_with_data_struct temp_abs_logger_with_data;
         temp_abs_logger_with_data.abs_logger_pointers = malloc((abs_logger_with_data->used_elements)*sizeof(struct abs_logger_struct*));
+	if (!temp_abs_logger_with_data.abs_logger_pointers) {
+	  fprintf(stderr,"Failure allocating list in Union function add_to_abs_logger_with_data 2/3- Exit!\n");
+	  exit(EXIT_FAILURE);
+	}
         int iterate;
         for (iterate=0;iterate<abs_logger_with_data->used_elements;iterate++) {
             temp_abs_logger_with_data.abs_logger_pointers[iterate]  = abs_logger_with_data->abs_logger_pointers[iterate];
@@ -830,17 +999,23 @@ void add_to_abs_logger_with_data(struct abs_logger_with_data_struct *abs_logger_
         free(abs_logger_with_data->abs_logger_pointers);
         abs_logger_with_data->allocated_elements = abs_logger_with_data->allocated_elements+5;
         abs_logger_with_data->abs_logger_pointers = malloc(abs_logger_with_data->allocated_elements*sizeof(struct abs_logger_struct*));
+	if (!abs_logger_with_data->abs_logger_pointers) {
+	  fprintf(stderr,"Failure allocating list in Union function add_to_abs_logger_with_data 3/3- Exit!\n");
+	  exit(EXIT_FAILURE);
+	}
         for (iterate=0;iterate<abs_logger_with_data->used_elements;iterate++) {
             abs_logger_with_data->abs_logger_pointers[iterate] = temp_abs_logger_with_data.abs_logger_pointers[iterate];
         }
 
         abs_logger_with_data->abs_logger_pointers[abs_logger_with_data->used_elements++] = abs_logger;
-        
-        
+
+	// Clear up temporary memory
+	free(temp_abs_logger_with_data.abs_logger_pointers);
+
     } else {
         abs_logger_with_data->abs_logger_pointers[abs_logger_with_data->used_elements++] = abs_logger;
     }
-    
+
 };
 
 
@@ -849,13 +1024,29 @@ void add_function_to_conditional_list(struct conditional_list_struct *list,condi
     if (list->num_elements == 0) {
       list->num_elements++;
       list->conditional_functions = malloc(list->num_elements*sizeof(conditional_function_pointer));
+      if (!list->conditional_functions) {
+	fprintf(stderr,"Failure allocating list in Union function add_function_to_conditional_list 1/6 - Exit!\n");
+	exit(EXIT_FAILURE);
+      }
       list->p_data_unions = malloc(list->num_elements*sizeof(union conditional_data_union*));
+      if (!list->p_data_unions) {
+	fprintf(stderr,"Failure allocating list in Union function add_function_to_conditional_list 2/6 - Exit!\n");
+	exit(EXIT_FAILURE);
+      }
       list->conditional_functions[0] = new;
       list->p_data_unions[0] = data_union;
     }
     else {
     conditional_function_pointer *temp_fp=malloc(list->num_elements*sizeof(conditional_function_pointer));
-    union conditional_data_union **temp_du=malloc(list->num_elements*sizeof(union conditional_data_union));
+    if (!temp_fp) {
+      fprintf(stderr,"Failure allocating list in Union function add_function_to_conditional_list 3/6 - Exit!\n");
+      exit(EXIT_FAILURE);
+    }
+    union conditional_data_union **temp_du=malloc(list->num_elements*sizeof(union conditional_data_union*));
+    if (!temp_du) {
+      fprintf(stderr,"Failure allocating list in Union function add_function_to_conditional_list 4/6 - Exit!\n");
+      exit(EXIT_FAILURE);
+    }
     int iterate;
     // Could even get away with a shallow copy here instead of the loop, but it is not relevant for performance.
     for (iterate=0;iterate<list->num_elements;iterate++) {
@@ -866,11 +1057,21 @@ void add_function_to_conditional_list(struct conditional_list_struct *list,condi
     free(list->p_data_unions);
     list->num_elements++;
     list->conditional_functions = malloc(list->num_elements*sizeof(conditional_function_pointer));
+    if (!list->conditional_functions) {
+      fprintf(stderr,"Failure allocating list in Union function add_function_to_conditional_list 5/6 - Exit!\n");
+      exit(EXIT_FAILURE);
+    }
     list->p_data_unions = malloc(list->num_elements*sizeof(union conditional_data_union*));
+    if (!list->p_data_unions) {
+      fprintf(stderr,"Failure allocating list in Union function add_function_to_conditional_list 6/6 - Exit!\n");
+      exit(EXIT_FAILURE);
+    }
     
     for (iterate=0;iterate<list->num_elements-1;iterate++) {
       list->conditional_functions[iterate] = temp_fp[iterate];
       list->p_data_unions[iterate] = temp_du[iterate];
+	  free(temp_fp);
+	  free(temp_du);
     }
     list->conditional_functions[list->num_elements-1] = new;
     list->p_data_unions[list->num_elements-1] = data_union;
@@ -910,26 +1111,34 @@ void print_rotation(Rotation rot, char *name) {
     printf("[%f %f %f]\n",rot[1][0],rot[1][1],rot[1][2]);
     printf("[%f %f %f]\n\n",rot[2][0],rot[2][1],rot[2][2]);
 };
-    
+
 void allocate_list_from_temp(int num_elements,struct pointer_to_1d_int_list original,struct pointer_to_1d_int_list *new) {
         int iterate;
-    
+
         new->num_elements = num_elements;
         if (num_elements > 0) {
             new->elements = malloc(num_elements*sizeof(int));
+	    if (!new->elements) {
+	      fprintf(stderr,"Failure allocating list in Union function allocate_list_from_temp - Exit!\n");
+	      exit(EXIT_FAILURE);
+	    }
             for (iterate = 0;iterate < num_elements; iterate++) new->elements[iterate] = original.elements[iterate];
         } else new->elements = NULL;
-    
+
     };
 
 void allocate_logic_list_from_temp(int num_elements,struct pointer_to_1d_int_list original, struct pointer_to_1d_int_list *new) {
         // A logic list shares the same structure of a normal list, but instead of listing numbers, it is a list of yes / no (1/0)
         // Giving this function a list of [1 3 5] (and num_elements = 9) would return [0 1 0 1 0 1 0 0 0];
         int iterate;
-    
+
         new->num_elements = num_elements;
         if (num_elements > 0) {
             new->elements = malloc(num_elements*sizeof(int));
+	    if (!new->elements) {
+	      fprintf(stderr,"Failure allocating list in Union function allocate_logic_list_from_temp - Exit!\n");
+	      exit(EXIT_FAILURE);
+	    }
             for (iterate = 0;iterate < num_elements;iterate++) new->elements[iterate] = 0;
             for (iterate = 0;iterate < original.num_elements;iterate++) {
                 if (original.elements[iterate] < num_elements)
@@ -955,19 +1164,28 @@ void add_position_pointer_to_list(struct global_positions_to_transform_list_stru
     if (list->num_elements == 0) {
       list->num_elements++;
       list->positions = malloc(list->num_elements*sizeof(Coords*));
+      if (!list->positions) {
+	fprintf(stderr,"Failure allocating list in Union function add_position_pointer_to_list - Exit!\n");
+	exit(EXIT_FAILURE);
+      }
       list->positions[0] = new_position_pointer;
     } else {
       Coords **temp;
       temp = malloc(list->num_elements*sizeof(Coords*));
-      if (temp == NULL) printf("malloc failed in add_position_pointer_to_list for temp\n");
-      
+      if (temp == NULL) {
+	fprintf(stderr,"malloc failed in add_position_pointer_to_list for temp\n");
+	exit(EXIT_FAILURE);
+      }
       int iterate;
       for (iterate=0;iterate<list->num_elements;iterate++)
         temp[iterate] = list->positions[iterate];
       free(list->positions);
       list->num_elements++;
       list->positions = malloc(list->num_elements*sizeof(Coords*));
-      if (list->positions == NULL) printf("malloc failed in add_position_pointer_to_list for list->positions\n");
+      if (list->positions == NULL) {
+	fprintf(stderr,"malloc failed in add_position_pointer_to_list for list->positions\n");
+	exit(EXIT_FAILURE);
+      }
       
       for (iterate=0;iterate<list->num_elements-1;iterate++)
         list->positions[iterate] = temp[iterate];
@@ -980,17 +1198,28 @@ void add_rotation_pointer_to_list(struct global_rotations_to_transform_list_stru
     if (list->num_elements == 0) {
       list->num_elements++;
       list->rotations = malloc(list->num_elements*sizeof(Rotation*));
+      if (!list->rotations) {
+	fprintf(stderr,"Failure allocating list in Union function add_rotation_pointer_to_list 1 - Exit!\n");
+	exit(EXIT_FAILURE);
+      }
       list->rotations[0] = new_rotation_pointer;
     } else {
       Rotation **temp;
       temp = malloc(list->num_elements*sizeof(Rotation*));
+      if (!temp) {
+	fprintf(stderr,"Failure allocating list in Union function add_rotation_pointer_to_list 2 - Exit!\n");
+	exit(EXIT_FAILURE);
+      }
       int iterate;
       for (iterate=0;iterate<list->num_elements;iterate++)
         temp[iterate] = list->rotations[iterate];
       free(list->rotations);
       list->num_elements++;
       list->rotations = malloc(list->num_elements*sizeof(Rotation*));
-      
+      if (!list->rotations) {
+	fprintf(stderr,"Failure allocating list in Union function add_rotation_pointer_to_list 3 - Exit!\n");
+	exit(EXIT_FAILURE);
+      }
       for (iterate=0;iterate<list->num_elements-1;iterate++)
         list->rotations[iterate] = temp[iterate];
       free(temp);
@@ -1002,72 +1231,173 @@ void add_element_to_process_list(struct pointer_to_global_process_list *list,str
     if (list->num_elements == 0) {
     list->num_elements++;
     list-> elements = malloc(list->num_elements*sizeof(struct global_process_element_struct));
+    if (!list->elements) {
+      fprintf(stderr,"Failure allocating list in Union function add_element_to_process_list 1 - Exit!\n");
+      exit(EXIT_FAILURE);
+    }
     list-> elements[0] = new_element;
     }
     else {
       struct global_process_element_struct *temp=malloc(list->num_elements*sizeof(struct global_process_element_struct));
-    int iterate;
-    for (iterate=0;iterate<list->num_elements;iterate++) temp[iterate] = list->elements[iterate];
-    free(list->elements);
-    list->num_elements++;
-    list-> elements = malloc(list->num_elements*sizeof(struct global_process_element_struct));
-    for (iterate=0;iterate<list->num_elements-1;iterate++) list->elements[iterate] = temp[iterate];
-    free(temp);
-    list->elements[list->num_elements-1] = new_element;
+      if (!temp) {
+	fprintf(stderr,"Failure allocating list in Union function add_element_to_process_list 1 - Exit!\n");
+	exit(EXIT_FAILURE);
+      }
+      int iterate;
+      for (iterate=0;iterate<list->num_elements;iterate++) temp[iterate] = list->elements[iterate];
+      free(list->elements);
+      list->num_elements++;
+      list-> elements = malloc(list->num_elements*sizeof(struct global_process_element_struct));
+      if (!list->elements) {
+	fprintf(stderr,"Failure allocating list in Union function add_element_to_process_list 3 - Exit!\n");
+	exit(EXIT_FAILURE);
+      }
+      for (iterate=0;iterate<list->num_elements-1;iterate++) list->elements[iterate] = temp[iterate];
+      free(temp);
+      list->elements[list->num_elements-1] = new_element;
     }
 };
 
 void add_element_to_material_list(struct pointer_to_global_material_list *list,struct global_material_element_struct new_element) {
     if (list->num_elements == 0) {
-    list->num_elements++;
-    list-> elements = malloc(list->num_elements*sizeof(struct global_material_element_struct));
-    list-> elements[0] = new_element;
+      list->num_elements++;
+      list->elements = malloc(list->num_elements*sizeof(struct global_material_element_struct));
+      if (!list->elements) {
+	fprintf(stderr,"Failure allocating list in Union function add_element_to_material_list 1 - Exit!\n");
+	exit(EXIT_FAILURE);
+      }
+      list->elements[0] = new_element;
     }
     else {
-    struct global_material_element_struct *temp=malloc(list->num_elements*sizeof(struct global_material_element_struct));
-    int iterate;
-    for (iterate=0;iterate<list->num_elements;iterate++) temp[iterate] = list->elements[iterate];
-    free(list->elements);
-    list->num_elements++;
-    list-> elements = malloc(list->num_elements*sizeof(struct global_material_element_struct));
-    for (iterate=0;iterate<list->num_elements-1;iterate++) list->elements[iterate] = temp[iterate];
-    free(temp);
-    list->elements[list->num_elements-1] = new_element;
+      struct global_material_element_struct *temp=malloc(list->num_elements*sizeof(struct global_material_element_struct));
+      if (!temp) {
+	fprintf(stderr,"Failure allocating list in Union function add_element_to_material_list 2 - Exit!\n");
+	exit(EXIT_FAILURE);
+      }
+      int iterate;
+      for (iterate=0;iterate<list->num_elements;iterate++) temp[iterate] = list->elements[iterate];
+      free(list->elements);
+      list->num_elements++;
+      list-> elements = malloc(list->num_elements*sizeof(struct global_material_element_struct));
+      if (!list->elements) {
+	fprintf(stderr,"Failure allocating list in Union function add_element_to_material_list 3 - Exit!\n");
+	exit(EXIT_FAILURE);
+      }
+      for (iterate=0;iterate<list->num_elements-1;iterate++) list->elements[iterate] = temp[iterate];
+      free(temp);
+      list->elements[list->num_elements-1] = new_element;
+    }
+};
+
+void add_element_to_surface_list(struct pointer_to_global_surface_list *list, struct global_surface_element_struct new_element) {
+    if (list->num_elements == 0) {
+      list->num_elements++;
+      list->elements = malloc(list->num_elements*sizeof(struct global_surface_element_struct));
+      if (!list->elements) {
+	fprintf(stderr,"Failure allocating list in Union function add_element_to_surface_list 1 - Exit!\n");
+	exit(EXIT_FAILURE);
+      }
+      list->elements[0] = new_element;
+    }
+    else {
+      struct global_surface_element_struct *temp=malloc(list->num_elements*sizeof(struct global_surface_element_struct));
+      if (!temp) {
+	fprintf(stderr,"Failure allocating list in Union function add_element_to_surface_list 2 - Exit!\n");
+	exit(EXIT_FAILURE);
+      }
+      int iterate;
+      for (iterate=0;iterate<list->num_elements;iterate++) temp[iterate] = list->elements[iterate];
+      free(list->elements);
+      list->num_elements++;
+      list-> elements = malloc(list->num_elements*sizeof(struct global_surface_element_struct));
+      if (!list->elements) {
+	fprintf(stderr,"Failure allocating list in Union function add_element_to_surface_list 3 - Exit!\n");
+	exit(EXIT_FAILURE);
+      }
+      for (iterate=0;iterate<list->num_elements-1;iterate++) list->elements[iterate] = temp[iterate];
+      free(temp);
+      list->elements[list->num_elements-1] = new_element;
+    }
+};
+
+void add_element_to_surface_stack(struct surface_stack_struct *list, struct surface_process_struct *new_element) {
+    if (list->number_of_surfaces == 0) {
+        if (!list->p_surface_array) {
+            fprintf(stderr, "Memory allocation failed\n");
+            exit(EXIT_FAILURE);
+        }
+        list->p_surface_array[0] = new_element;
+        list->number_of_surfaces = 1;
+    } else {
+        // Reallocate with space for one more element
+        struct surface_process_struct **temp = realloc(list->p_surface_array, 
+            (list->number_of_surfaces + 1) * sizeof(struct surface_process_struct*));
+        if (!temp) {
+            fprintf(stderr, "Memory reallocation failed\n");
+            exit(EXIT_FAILURE);
+        }
+        list->p_surface_array = temp;
+        list->p_surface_array[list->number_of_surfaces] = new_element;
+        list->number_of_surfaces++;
     }
 };
 
 void add_element_to_geometry_list(struct pointer_to_global_geometry_list *list,struct global_geometry_element_struct new_element) {
     if (list->num_elements == 0) {
-    list->num_elements++;
-    list-> elements = malloc(list->num_elements*sizeof(struct global_geometry_element_struct));
-    list-> elements[0] = new_element;
+      list->num_elements++;
+      list->elements = malloc(list->num_elements*sizeof(struct global_geometry_element_struct));
+      if (!list->elements) {
+	fprintf(stderr,"Failure allocating list in Union function add_element_to_geometry_list 1 - Exit!\n");
+	exit(EXIT_FAILURE);
+      }
+      list->elements[0] = new_element;
     }
     else {
-    struct global_geometry_element_struct *temp=malloc(list->num_elements*sizeof(struct global_geometry_element_struct));
-    int iterate;
-    for (iterate=0;iterate<list->num_elements;iterate++) temp[iterate] = list->elements[iterate];
-    free(list->elements);
-    list->num_elements++;
-    list-> elements = malloc(list->num_elements*sizeof(struct global_geometry_element_struct));
-    for (iterate=0;iterate<list->num_elements-1;iterate++) list->elements[iterate] = temp[iterate];
-    free(temp);
-    list->elements[list->num_elements-1] = new_element;
+      struct global_geometry_element_struct *temp=malloc(list->num_elements*sizeof(struct global_geometry_element_struct));
+      if (!temp) {
+	fprintf(stderr,"Failure allocating list in Union function add_element_to_geometry_list 2 - Exit!\n");
+	exit(EXIT_FAILURE);
+      }
+      int iterate;
+      for (iterate=0;iterate<list->num_elements;iterate++) temp[iterate] = list->elements[iterate];
+      free(list->elements);
+      list->num_elements++;
+      list-> elements = malloc(list->num_elements*sizeof(struct global_geometry_element_struct));
+      if (!list->elements) {
+	fprintf(stderr,"Failure allocating list in Union function add_element_to_geometry_list 3 - Exit!\n");
+	exit(EXIT_FAILURE);
+      }
+      for (iterate=0;iterate<list->num_elements-1;iterate++) list->elements[iterate] = temp[iterate];
+      free(temp);
+      list->elements[list->num_elements-1] = new_element;
     }
 };
 
 void add_element_to_logger_list(struct pointer_to_global_logger_list *list,struct global_logger_element_struct new_element) {
     if (list->num_elements == 0) {
     list->num_elements++;
-    list-> elements = malloc(list->num_elements*sizeof(struct global_logger_element_struct));
-    list-> elements[0] = new_element;
+    list->elements = malloc(list->num_elements*sizeof(struct global_logger_element_struct));
+    if (!list->elements) {
+      fprintf(stderr,"Failure allocating list in Union function add_element_to_logger_list 1 - Exit!\n");
+      exit(EXIT_FAILURE);
+    }
+    list->elements[0] = new_element;
     }
     else {
     struct global_logger_element_struct *temp=malloc(list->num_elements*sizeof(struct global_logger_element_struct));
+    if (!temp) {
+      fprintf(stderr,"Failure allocating list in Union function add_element_to_logger_list 2 - Exit!\n");
+      exit(EXIT_FAILURE);
+    }
     int iterate;
     for (iterate=0;iterate<list->num_elements;iterate++) temp[iterate] = list->elements[iterate];
     free(list->elements);
     list->num_elements++;
     list-> elements = malloc(list->num_elements*sizeof(struct global_logger_element_struct));
+    if (!list->elements) {
+      fprintf(stderr,"Failure allocating list in Union function add_element_to_logger_list 3 - Exit!\n");
+      exit(EXIT_FAILURE);
+    }
     for (iterate=0;iterate<list->num_elements-1;iterate++) list->elements[iterate] = temp[iterate];
     free(temp);
     list->elements[list->num_elements-1] = new_element;
@@ -1078,15 +1408,27 @@ void add_element_to_abs_logger_list(struct pointer_to_global_abs_logger_list *li
     if (list->num_elements == 0) {
       list->num_elements++;
       list->elements = malloc(list->num_elements*sizeof(struct global_abs_logger_element_struct));
+      if (!list->elements) {
+	fprintf(stderr,"Failure allocating list in Union function add_element_to_abs_logger_list 1 - Exit!\n");
+	exit(EXIT_FAILURE);
+      }
       list->elements[0] = new_element;
     }
     else {
       struct global_abs_logger_element_struct *temp=malloc(list->num_elements*sizeof(struct global_abs_logger_element_struct));
+      if (!temp) {
+	fprintf(stderr,"Failure allocating list in Union function add_element_to_abs_logger_list 2 - Exit!\n");
+	exit(EXIT_FAILURE);
+      }
       int iterate;
       for (iterate=0;iterate<list->num_elements;iterate++) temp[iterate] = list->elements[iterate];
       free(list->elements);
       list->num_elements++;
       list-> elements = malloc(list->num_elements*sizeof(struct global_abs_logger_element_struct));
+      if (!list->elements) {
+	fprintf(stderr,"Failure allocating list in Union function add_element_to_abs_logger_list 3 - Exit!\n");
+	exit(EXIT_FAILURE);
+      }
       for (iterate=0;iterate<list->num_elements-1;iterate++) list->elements[iterate] = temp[iterate];
       free(temp);
       list->elements[list->num_elements-1] = new_element;
@@ -1095,39 +1437,63 @@ void add_element_to_abs_logger_list(struct pointer_to_global_abs_logger_list *li
 
 void add_element_to_tagging_conditional_list(struct global_tagging_conditional_list_struct *list,struct global_tagging_conditional_element_struct new_element) {
     if (list->num_elements == 0) {
-    list->num_elements++;
-    list->elements = malloc(list->num_elements*sizeof(struct global_tagging_conditional_element_struct));
-    list->elements[0] = new_element;
+      list->num_elements++;
+      list->elements = malloc(list->num_elements*sizeof(struct global_tagging_conditional_element_struct));
+      if (!list->elements) {
+	fprintf(stderr,"Failure allocating list in Union function add_element_to_tagging_conditional_list 1 - Exit!\n");
+	exit(EXIT_FAILURE);
+      }
+      list->elements[0] = new_element;
     }
     else {
-    struct global_tagging_conditional_element_struct *temp=malloc(list->num_elements*sizeof(struct global_tagging_conditional_element_struct));
-    int iterate;
-    for (iterate=0;iterate<list->num_elements;iterate++) temp[iterate] = list->elements[iterate];
-    free(list->elements);
-    list->num_elements++;
-    list->elements = malloc(list->num_elements*sizeof(struct global_tagging_conditional_element_struct));
-    for (iterate=0;iterate<list->num_elements-1;iterate++) list->elements[iterate] = temp[iterate];
-    free(temp);
-    list->elements[list->num_elements-1] = new_element;
+      struct global_tagging_conditional_element_struct *temp=malloc(list->num_elements*sizeof(struct global_tagging_conditional_element_struct));
+      if (!temp) {
+	fprintf(stderr,"Failure allocating list in Union function add_element_to_tagging_conditional_list 2 - Exit!\n");
+	exit(EXIT_FAILURE);
+      }
+      int iterate;
+      for (iterate=0;iterate<list->num_elements;iterate++) temp[iterate] = list->elements[iterate];
+      free(list->elements);
+      list->num_elements++;
+      list->elements = malloc(list->num_elements*sizeof(struct global_tagging_conditional_element_struct));
+      if (!list->elements) {
+	fprintf(stderr,"Failure allocating list in Union function add_element_to_tagging_conditional_list 3 - Exit!\n");
+	exit(EXIT_FAILURE);
+      }
+      for (iterate=0;iterate<list->num_elements-1;iterate++) list->elements[iterate] = temp[iterate];
+      free(temp);
+      list->elements[list->num_elements-1] = new_element;
     }
 };
 
 void add_element_to_master_list(struct pointer_to_global_master_list *list,struct global_master_element_struct new_element) {
     if (list->num_elements == 0) {
-    list->num_elements++;
-    list->elements = malloc(list->num_elements*sizeof(struct global_master_element_struct));
-    list->elements[0] = new_element;
+      list->num_elements++;
+      list->elements = malloc(list->num_elements*sizeof(struct global_master_element_struct));
+      if (!list->elements) {
+	fprintf(stderr,"Failure allocating list in Union function add_element_to_master_list 1 - Exit!\n");
+	exit(EXIT_FAILURE);
+      }
+      list->elements[0] = new_element;
     }
     else {
-    struct global_master_element_struct *temp=malloc(list->num_elements*sizeof(struct global_master_element_struct));
-    int iterate;
-    for (iterate=0;iterate<list->num_elements;iterate++) temp[iterate] = list->elements[iterate];
-    free(list->elements);
-    list->num_elements++;
-    list-> elements = malloc(list->num_elements*sizeof(struct global_master_element_struct));
-    for (iterate=0;iterate<list->num_elements-1;iterate++) list->elements[iterate] = temp[iterate];
-    free(temp);
-    list->elements[list->num_elements-1] = new_element;
+      struct global_master_element_struct *temp=malloc(list->num_elements*sizeof(struct global_master_element_struct));
+      if (!temp) {
+	fprintf(stderr,"Failure allocating list in Union function add_element_to_master_list 2 - Exit!\n");
+	exit(EXIT_FAILURE);
+      }
+      int iterate;
+      for (iterate=0;iterate<list->num_elements;iterate++) temp[iterate] = list->elements[iterate];
+      free(list->elements);
+      list->num_elements++;
+      list-> elements = malloc(list->num_elements*sizeof(struct global_master_element_struct));
+      if (!list->elements) {
+	fprintf(stderr,"Failure allocating list in Union function add_element_to_master_list 3 - Exit!\n");
+	exit(EXIT_FAILURE);
+      }
+      for (iterate=0;iterate<list->num_elements-1;iterate++) list->elements[iterate] = temp[iterate];
+      free(temp);
+      list->elements[list->num_elements-1] = new_element;
     }
 };
 
@@ -1136,70 +1502,73 @@ void add_initialized_logger_in_volume(struct loggers_struct *loggers,int number_
   if (loggers->num_elements == 0) {
     loggers->num_elements++;
     loggers->p_logger_volume = malloc(loggers->num_elements * sizeof(struct logger_for_each_process_list));
+    if (!loggers->p_logger_volume) {
+      fprintf(stderr,"Failure allocating list in Union function add_initialized_logger_in_volume 1 - Exit!\n");
+      exit(EXIT_FAILURE);
+    }
     loggers->p_logger_volume[0].num_elements = number_of_processes;
     loggers->p_logger_volume[0].p_logger_process = malloc(number_of_processes * sizeof(struct logger_struct**));
+    if (!loggers->p_logger_volume[0].p_logger_process) {
+      fprintf(stderr,"Failure allocating list in Union function add_initialized_logger_in_volume 2 - Exit!\n");
+      exit(EXIT_FAILURE);
+    }
     for (iterate=0;iterate<number_of_processes;iterate++)
       loggers->p_logger_volume[0].p_logger_process[iterate] = NULL;
   } else {
     // Already some elements, store them in temp, free main, transfer back and add newest.
     struct logger_for_each_process_list *temp=malloc(loggers->num_elements*sizeof(struct logger_for_each_process_list));
-    
+    if (!temp) {
+      fprintf(stderr,"Failure allocating list in Union function add_initialized_logger_in_volume 3 - Exit!\n");
+      exit(EXIT_FAILURE);
+    }
     for (iterate=0;iterate<loggers->num_elements;iterate++) temp[iterate] = loggers->p_logger_volume[iterate];
     free(loggers->p_logger_volume);
     loggers->num_elements++;
     loggers->p_logger_volume = malloc(loggers->num_elements*sizeof(struct logger_for_each_process_list));
+    if (!loggers->p_logger_volume) {
+      fprintf(stderr,"Failure allocating list in Union function add_initialized_logger_in_volume 4 - Exit!\n");
+      exit(EXIT_FAILURE);
+    }
     for (iterate=0;iterate<loggers->num_elements-1;iterate++) loggers->p_logger_volume[iterate] = temp[iterate];
     free(temp);
     loggers->p_logger_volume[loggers->num_elements-1].num_elements = number_of_processes;
     loggers->p_logger_volume[loggers->num_elements-1].p_logger_process = malloc(number_of_processes * sizeof(struct logger_struct**));
+    if (!loggers->p_logger_volume[loggers->num_elements-1].p_logger_process) {
+      fprintf(stderr,"Failure allocating list in Union function add_initialized_logger_in_volume 5 - Exit!\n");
+      exit(EXIT_FAILURE);
+    }
     for (iterate=0;iterate<number_of_processes;iterate++) {
       loggers->p_logger_volume[loggers->num_elements-1].p_logger_process[iterate] = NULL;
     }
   }
 };
 
-/*
-void add_initialized_abs_logger_in_volume(struct abs_loggers_struct *abs_loggers, int number_of_processes) {
-  int iterate;
-  if (abs_loggers->num_elements == 0) {
-    abs_loggers->num_elements++;
-    abs_loggers->p_abs_logger_volume = malloc(abs_loggers->num_elements * sizeof(struct abs_loggers_struct));
-    abs_loggers->p_abs_logger_volume[0].num_elements = number_of_processes;
-    abs_loggers->p_abs_logger_volume[0].p_abs_logger_process = malloc(number_of_processes * sizeof(struct abs_logger_struct**));
-    for (iterate=0;iterate<number_of_processes;iterate++)
-      abs_loggers->p_abs_logger_volume[0].p_abs_logger_process[iterate] = NULL;
-  } else {
-    // Already some elements, store them in temp, free main, transfer back and add newest.
-    struct abs_logger_for_each_process_list temp[abs_loggers->num_elements];
-    
-    for (iterate=0;iterate<abs_loggers->num_elements;iterate++) temp[iterate] = abs_loggers->p_abs_logger_volume[iterate];
-    free(abs_loggers->p_abs_logger_volume);
-    abs_loggers->num_elements++;
-    abs_loggers->p_abs_logger_volume = malloc(abs_loggers->num_elements*sizeof(struct abs_logger_for_each_process_list));
-    for (iterate=0;iterate<abs_loggers->num_elements-1;iterate++) abs_loggers->p_abs_logger_volume[iterate] = temp[iterate];
-    abs_loggers->p_abs_logger_volume[abs_loggers->num_elements-1].num_elements = number_of_processes;
-    abs_loggers->p_abs_logger_volume[abs_loggers->num_elements-1].p_abs_logger_process = malloc(number_of_processes * sizeof(struct abs_logger_struct**));
-    for (iterate=0;iterate<number_of_processes;iterate++) {
-      abs_loggers->p_abs_logger_volume[abs_loggers->num_elements-1].p_abs_logger_process[iterate] = NULL;
-    }
-  }
-};
-*/
 
 void add_initialized_abs_logger_in_volume(struct abs_loggers_struct *abs_loggers) {
   int iterate;
   if (abs_loggers->num_elements == 0) {
     abs_loggers->num_elements++;
     abs_loggers->p_abs_logger = malloc(abs_loggers->num_elements * sizeof(struct abs_logger_struct*));
+    if (!abs_loggers->p_abs_logger) {
+      fprintf(stderr,"Failure allocating list in Union function add_initialized_abs_logger_in_volume 1 - Exit!\n");
+      exit(EXIT_FAILURE);
+    }
   } else {
     // Already some elements, store them in temp, free main, transfer back and add newest.
     struct abs_logger_struct **temp=malloc(abs_loggers->num_elements*sizeof(struct abs_logger_struct *));
-    
+    if (!temp) {
+      fprintf(stderr,"Failure allocating list in Union function add_initialized_abs_logger_in_volume 2 - Exit!\n");
+      exit(EXIT_FAILURE);
+    }
     for (iterate=0;iterate<abs_loggers->num_elements;iterate++) temp[iterate] = abs_loggers->p_abs_logger[iterate];
     free(abs_loggers->p_abs_logger);
-    
+
     abs_loggers->num_elements++;
     abs_loggers->p_abs_logger = malloc(abs_loggers->num_elements*sizeof(struct abs_logger_struct*));
+    if (!abs_loggers->p_abs_logger) {
+      fprintf(stderr,"Failure allocating list in Union function add_initialized_abs_logger_in_volume 3 - Exit!\n");
+      exit(EXIT_FAILURE);
+    }
     for (iterate=0;iterate<abs_loggers->num_elements-1;iterate++) abs_loggers->p_abs_logger[iterate] = temp[iterate];
     free(temp);
     abs_loggers->p_abs_logger[abs_loggers->num_elements-1] = NULL;
@@ -1217,7 +1586,7 @@ void update_current_mask_intersect_status(struct pointer_to_1d_int_list *current
   //  meaning a volume needs to be within ALL/ANY of it's masks to have a status of 1
   // In most cases this mask_intersect_list will be empty, and memory operations are avoided
   //printf("Number of elements to be check: %d \n",Volumes[*current_volume]->geometry.mask_intersect_list.num_elements);
-  
+
   if (Volumes[*current_volume]->geometry.mask_intersect_list.num_elements > 0) {
     int iterate,this_element,*mask_start,*mask_check;
     for (iterate=0;iterate<Volumes[*current_volume]->geometry.mask_intersect_list.num_elements;iterate++) {
@@ -1248,29 +1617,7 @@ void update_current_mask_intersect_status(struct pointer_to_1d_int_list *current
       }
     }
   }
-    
-  /* Original version compatible with trace scope
-  for (iterate=0;iterate<Volumes[current_volume]->geometry.mask_intersect_list.num_elements;iterate++) {
-    this_element = Volumes[current_volume]->geometry.mask_intersect_list.elements[iterate];
-    if (Volumes[this_element]->geometry.mask_mode == 2) { // ANY mask mode
-      current_mask_intersect_list_status.elements[iterate] = 0; // Assume the mask status is 0, but if any are 1, take that instead
-      for (mask_start=mask_check=Volumes[this_element]->geometry.masked_by_mask_index_list.elements;mask_check-mask_start<Volumes[this_element]->geometry.masked_by_mask_index_list.num_elements;mask_check++) {
-        if (mask_status_list[*mask_check] == 1) {
-          current_mask_intersect_list_status.elements[iterate] = 1;
-          break;
-        }
-      }
-    } else { // ALL mask mode
-      current_mask_intersect_list_status.elements[iterate] = 1; // Assume the mask status is 1, but if any one is 0, take that instead
-      for (mask_start=mask_check=Volumes[this_element]->geometry.masked_by_mask_index_list.elements;mask_check-mask_start<Volumes[this_element]->geometry.masked_by_mask_index_list.num_elements;mask_check++) {
-        if (mask_status_list[*mask_check] == 0) {
-          current_mask_intersect_list_status.elements[iterate] = 0;
-          break;
-        }
-      }
-    }
-  }
-  */
+
 }
 
 // -------------    Tagging functions    ------------------------------------------------------------------
@@ -1296,18 +1643,12 @@ struct tagging_tree_node_struct *make_tagging_tree_node(void) {
 
 
 struct tagging_tree_node_struct  *simple_initialize_tagging_tree_node(struct tagging_tree_node_struct *new_node) {
-    //struct tagging_tree_node_struct *dummy;
-    //dummy = malloc(sizeof(struct tagging_tree_node_struct));
-    //new_node = dummy;
-    
-    //new_node->element = (struct tagging_tree_node_struct *) malloc(sizeof(struct tagging_tree_node_struct));
-    //new_node = (struct tagging_tree_node_struct *) malloc(sizeof(struct tagging_tree_node_struct));
     new_node = make_tagging_tree_node();
-    
+
     if (new_node == NULL) printf("ERROR, Union tagging system could not allocate memory\n");
     new_node->intensity = 4.2; // (double) 4.2;
     new_node->number_of_rays = 42; //(int) 42;
-    
+
     printf("new_node->intensity = %f, new_node->number_of_rays = %d \n",new_node->intensity,new_node->number_of_rays);
     return new_node;
 };
@@ -1315,27 +1656,33 @@ struct tagging_tree_node_struct  *simple_initialize_tagging_tree_node(struct tag
 
 struct tagging_tree_node_struct *initialize_tagging_tree_node(struct tagging_tree_node_struct *new_node, struct tagging_tree_node_struct *above_node, struct Volume_struct *this_volume) {
     new_node = make_tagging_tree_node();
-    
+
     new_node->intensity = (double) 0;
     new_node->number_of_rays = (int) 0;
     new_node->above = above_node;
-    
+
     int next_volume_list_length = this_volume->geometry.next_volume_list.num_elements;
     new_node->volume_branches = malloc(next_volume_list_length*sizeof(struct tagging_tree_node_struct*));
+    if (!new_node->volume_branches) {
+      fprintf(stderr,"Failure allocating list in Union function tagging_tree_node_struct 1 - Exit!\n");
+      exit(EXIT_FAILURE);
+    }
     int iterate;
     // Initializing pointers so that they can be checked for NULL later. Is this redundant? Does malloc return null pointers?
     for (iterate=0;iterate<next_volume_list_length;iterate++) new_node->volume_branches[iterate] = NULL;
-    //new_node->volume_branches.num_elements = dest_list_length; // May be removed
-    
+
     int number_of_processes;
     if (this_volume->p_physics == NULL) number_of_processes = 0;
     else number_of_processes = this_volume->p_physics->number_of_processes;
-    
+
     new_node->process_branches = malloc(number_of_processes*sizeof(struct tagging_tree_node_struct*));
+    if (!new_node->process_branches) {
+      fprintf(stderr,"Failure allocating list in Union function tagging_tree_node_struct 2 - Exit!\n");
+      exit(EXIT_FAILURE);
+    }
     // Initializing pointers so that they can be checked for NULL later. Is this redundant? Does malloc return null pointers?
     for (iterate=0;iterate<number_of_processes;iterate++) new_node->process_branches[iterate] = NULL;
-    //new_node->process_branches.num_elements=number_of_processes; // May be removed
-    
+
     return new_node;
 };
 
@@ -1355,28 +1702,28 @@ struct tagging_tree_node_struct *goto_process_node(struct tagging_tree_node_stru
         current_node = current_node->process_branches[process_index];
         return current_node;
     }
-    
+
     //return current_node;
 };
 
 struct tagging_tree_node_struct *goto_volume_node(struct tagging_tree_node_struct *current_node,int current_volume, int next_volume, struct Volume_struct **Volumes, int *stop_tagging_ray, int stop_creating_nodes) {
     // I have only allocated the number of node branches that corresponds to the current_volumes next_volume_list
     // The problem is to find where on the destination list the current volume is without doing a manual search
-    
+
     // With the new mask system there is a risk of going from and to the same volume, which should be ignored by the tagging system
     if (current_volume == next_volume) return current_node;
-    
+
     struct tagging_tree_node_struct *output;
     int next_volume_list_index = -1;
     // Temporary slow method for finding the correct index on the destination list
     int iterate;
-    
+
     for (iterate=0;iterate<Volumes[current_volume]->geometry.next_volume_list.num_elements;iterate++)
         if (Volumes[current_volume]->geometry.next_volume_list.elements[iterate] == next_volume) {
             next_volume_list_index = iterate;
             break;
         }
-    
+
     // Debug phase
     //printf("Tagging: going from volume %d to volume %d, which is index number %d on it's next volume list \n",current_volume,next_volume,next_volume_list_index);
     #ifndef OPENACC
@@ -1384,7 +1731,7 @@ struct tagging_tree_node_struct *goto_volume_node(struct tagging_tree_node_struc
         printf("ERROR in Union component, tagging or destination system failed, next volume was not on next volume list\n");
         printf("current_volume = %d, next_volume = %d \n",current_volume,next_volume);
         print_1d_int_list(Volumes[current_volume]->geometry.destinations_list,"destinations_list for current volume");
-        exit(1);
+        exit(EXIT_FAILURE);
     }
     #endif
 
@@ -1443,6 +1790,10 @@ void add_to_history(struct dynamic_history_list *history, int volume_index, int 
     //printf("Adding to history[%d]: volume_index = %d, process_index = %d \n",history->used_elements,volume_index,process_index);
     if (history->allocated_elements == 0) {
         history->elements = malloc(5*sizeof(struct history_node_struct));
+	if (!history->elements) {
+	  fprintf(stderr,"Failure allocating list in Union function add_to_history 1 - Exit!\n");
+	  exit(EXIT_FAILURE);
+	}
         history->used_elements = 1;
         history->allocated_elements = 5;
         history->elements[0].volume_index = volume_index;
@@ -1450,6 +1801,10 @@ void add_to_history(struct dynamic_history_list *history, int volume_index, int 
     } else if (history->used_elements > history->allocated_elements-1) {
         struct dynamic_history_list temp_history;
         temp_history.elements = malloc((history->used_elements)*sizeof(struct history_node_struct));
+	if (!temp_history.elements) {
+	  fprintf(stderr,"Failure allocating list in Union function add_to_history 2 - Exit!\n");
+	  exit(EXIT_FAILURE);
+	}
         int iterate;
         for (iterate=0;iterate<history->used_elements;iterate++) {
             temp_history.elements[iterate].volume_index  = history->elements[iterate].volume_index;
@@ -1457,23 +1812,30 @@ void add_to_history(struct dynamic_history_list *history, int volume_index, int 
         }
         free(history->elements);
         history->elements = malloc((history->allocated_elements+5)*sizeof(struct history_node_struct));
+	if (!history->elements) {
+	  fprintf(stderr,"Failure allocating list in Union function add_to_history 3 - Exit!\n");
+	  exit(EXIT_FAILURE);
+	}
         for (iterate=0;iterate<history->used_elements;iterate++) {
             history->elements[iterate].volume_index  = temp_history.elements[iterate].volume_index;
             history->elements[iterate].process_index = temp_history.elements[iterate].process_index;
         }
-        
+
         history->allocated_elements = history->allocated_elements+5;
-        
+
         history->elements[history->used_elements].volume_index = volume_index;
         history->elements[history->used_elements].process_index = process_index;
         history->used_elements = history->used_elements+1;
-        
+
+	// Clear up temporary memory
+	free(temp_history.elements);
+
     } else {
         history->elements[history->used_elements].volume_index = volume_index;
         history->elements[history->used_elements].process_index = process_index;
         history->used_elements++;
     }
-    
+
 };
 
 void printf_history(struct dynamic_history_list *history) {
@@ -1496,7 +1858,6 @@ void printf_history(struct dynamic_history_list *history) {
 void fprintf_total_history(struct saved_history_struct *history, FILE *fp) {
     fprintf(fp,"%d\t N I=%E \t", history->number_of_rays, history->intensity);
         int history_iterate;
-          //printf("History number %d, intensity = %f, number of rays = %d:",hist_num, search_node->intensity, search_node->number_of_rays);
           for (history_iterate=0;history_iterate<history->used_elements-1;history_iterate++) {
             if (history->elements[history_iterate].process_index == -1) {
                 fprintf(fp," V%d ->",history->elements[history_iterate].volume_index);
@@ -1511,25 +1872,6 @@ void fprintf_total_history(struct saved_history_struct *history, FILE *fp) {
           }
 }
 
-/*
-int Sample_compare_doubles (const void *a, const void *b) {
-  const double *da = (const double *) a;
-  const double *db = (const double *) b;
-
-  return (*da > *db) - (*da < *db);
-}
-*/
-
-
-/* TK: For osx compilation, changed ordering fct to use void* pointers. Orignal function was:
-int Sample_compare_history_intensities (const struct saved_history_struct *a, const struct saved_history_struct *b) {
-  const double *da = (const double *) &(a->intensity);
-  const double *db = (const double *) &(b->intensity);
-
-  return (*da < *db) - (*da > *db);
-}
-*/
-
 int Sample_compare_history_intensities (const void* a, const void* b) {
   const double da = ((const struct saved_history_struct *)a)->intensity;
   const double db = ((const struct saved_history_struct *)b)->intensity;
@@ -1539,37 +1881,41 @@ int Sample_compare_history_intensities (const void* a, const void* b) {
 void write_tagging_tree(struct list_of_tagging_tree_node_pointers *master_list, struct Volume_struct **Volumes, int total_history_counter, int number_of_volumes) {
   // Start from top of tree, go to extremeties, take results and add to disk / database, free that node
   int volume_index,done,volume_iterate,process_iterate,current_volume,next_node_found,current_number_of_processes,history_iterate,hist_num;
-  
+
   struct tagging_tree_node_struct *search_node;
   struct tagging_tree_node_struct **kill_candidate;
   struct dynamic_history_list history_data; // Allocate the history list struct
   struct dynamic_history_list *history;     // Use this pointer in the algorithm
-  
+
   struct total_history_struct total_history;
   total_history.saved_histories = malloc(total_history_counter * sizeof(struct saved_history_struct));
+  if (!total_history.saved_histories) {
+    fprintf(stderr,"Failure allocating list in Union function write_tagging_tree 1 - Exit!\n");
+    exit(EXIT_FAILURE);
+  }
   total_history.allocated_elements = total_history_counter;
   total_history.used_elements = 0;
-  
+
   history = &history_data;
-  
+
   history->used_elements = 0;
   history->allocated_elements = 0;
-  
+
   hist_num = 0;
   for (volume_index=0;volume_index<master_list->num_elements;volume_index++) {
-    
+
     search_node = master_list->elements[volume_index];
-    
+
     if (volume_index != 0)
         current_number_of_processes = Volumes[volume_index]->p_physics->number_of_processes;
     else
         current_number_of_processes = 0;
-    
+
     current_volume = volume_index;
     done = 0;
-    
+
     history->used_elements = 0;
-    
+
     add_to_history(history,current_volume,-1);
     while(done == 0) {
         next_node_found=0;
@@ -1581,7 +1927,7 @@ void write_tagging_tree(struct list_of_tagging_tree_node_pointers *master_list, 
                     current_number_of_processes = Volumes[current_volume]->p_physics->number_of_processes;
                 else
                     current_number_of_processes = 0;
-                
+
                 //search_node = &(search_node->volume_branches[volume_iterate]);
                 kill_candidate = &(search_node->volume_branches[volume_iterate]);
                 search_node = search_node->volume_branches[volume_iterate];
@@ -1607,7 +1953,7 @@ void write_tagging_tree(struct list_of_tagging_tree_node_pointers *master_list, 
             }
           }
         }
-        
+
         if (next_node_found == 0) {
           // write this history to disk / memory
           hist_num++;
@@ -1615,9 +1961,13 @@ void write_tagging_tree(struct list_of_tagging_tree_node_pointers *master_list, 
           if (history->used_elements > 0 && search_node->number_of_rays > 0) {
             //printf("%d rays (I=%E) with history: \t", search_node->number_of_rays, search_node->intensity);
             //printf_history(history);
-            
+
             total_history.saved_histories[total_history.used_elements].used_elements = history->used_elements;
             total_history.saved_histories[total_history.used_elements].elements = malloc(total_history.saved_histories[total_history.used_elements].used_elements*sizeof(struct history_node_struct));
+	    if (!total_history.saved_histories[total_history.used_elements].elements) {
+	      fprintf(stderr,"Failure allocating list in Union function write_tagging_tree 2 - Exit!\n");
+	      exit(EXIT_FAILURE);
+	    }
             for (history_iterate = 0;history_iterate<history->used_elements;history_iterate++) {
                 total_history.saved_histories[total_history.used_elements].elements[history_iterate] = history->elements[history_iterate];
                 //printf("total_history.saved_histories[total_history.used_elements].elements[%d].volume_index \n",history_iterate,total_history.saved_histories[total_history.used_elements].elements[history_iterate].volume_index);
@@ -1627,9 +1977,9 @@ void write_tagging_tree(struct list_of_tagging_tree_node_pointers *master_list, 
             total_history.saved_histories[total_history.used_elements].number_of_rays = search_node->number_of_rays;
             total_history.used_elements++;
           }
-          
+
           history->used_elements = 0;
-          
+
           // end of tree, no new nodes
           if (search_node->above == NULL) {
             done = 1;
@@ -1638,26 +1988,26 @@ void write_tagging_tree(struct list_of_tagging_tree_node_pointers *master_list, 
             *kill_candidate = NULL;
             free(search_node);
             search_node = master_list->elements[volume_index];
-            
+
             if (volume_index != 0)
               current_number_of_processes = Volumes[volume_index]->p_physics->number_of_processes;
             else
               current_number_of_processes = 0;
-    
+
             current_volume = volume_index;
             add_to_history(history,current_volume,-1);
           }
-          
+
         }
     }
   }
-  
+
   if (history->allocated_elements > 0) free(history->elements);
 
   qsort(total_history.saved_histories,total_history.used_elements,sizeof (struct saved_history_struct), Sample_compare_history_intensities);
-  
-  
-  
+
+
+
   MPI_MASTER(
   printf("\n\n");
   printf("Top 20 most common histories. Shows the index of volumes entered (VX), and the scattering processes (PX)\n");
@@ -1670,38 +2020,41 @@ void write_tagging_tree(struct list_of_tagging_tree_node_pointers *master_list, 
       entirely guaranteed by the standard): */
     printf_history((struct dynamic_history_list *)(&total_history.saved_histories[history_iterate]));
   }
-   
+
   FILE *fp;
+  
   fp = fopen("union_history.dat","w");
-  
-  fprintf(fp,"History file written by the McStas component Union_master \n");
-  fprintf(fp,"When running with MPI, the results may be from just a single thread, meaning intensities are divided by number of threads\n");
-  fprintf(fp,"----- Description of the used volumes -----------------------------------------------------------------------------------\n");
-  
-  fprintf(fp,"V0: Surrounding vacuum \n");
-  for (volume_iterate=1;volume_iterate<number_of_volumes;volume_iterate++) {
-    fprintf(fp,"V%d: %s  ",volume_iterate,Volumes[volume_iterate]->name);
-    fprintf(fp,"Material: %s  ",Volumes[volume_iterate]->p_physics->name);
-    for (process_iterate=0;process_iterate<Volumes[volume_iterate]->p_physics->number_of_processes;process_iterate++) {
-      fprintf(fp," P%d: %s",process_iterate,Volumes[volume_iterate]->p_physics->p_scattering_array[process_iterate].name);
+  if(!fp) {
+    fprintf(stderr,"WARNING: Could not write to logging output file union_history.dat\n");
+  } else {
+    fprintf(fp,"History file written by the McStas component Union_master \n");
+    fprintf(fp,"When running with MPI, the results may be from just a single thread, meaning intensities are divided by number of threads\n");
+    fprintf(fp,"----- Description of the used volumes -----------------------------------------------------------------------------------\n");
+
+    fprintf(fp,"V0: Surrounding vacuum \n");
+    for (volume_iterate=1;volume_iterate<number_of_volumes;volume_iterate++) {
+      fprintf(fp,"V%d: %s  ",volume_iterate,Volumes[volume_iterate]->name);
+      fprintf(fp,"Material: %s  ",Volumes[volume_iterate]->p_physics->name);
+      for (process_iterate=0;process_iterate<Volumes[volume_iterate]->p_physics->number_of_processes;process_iterate++) {
+	fprintf(fp," P%d: %s",process_iterate,Volumes[volume_iterate]->p_physics->p_scattering_array[process_iterate].name);
+      }
+      fprintf(fp,"\n");
     }
-    fprintf(fp,"\n");
+    fprintf(fp,"----- Histories sorted after intensity ----------------------------------------------------------------------------------\n");
+
+    for (history_iterate=0;history_iterate<total_history.used_elements;history_iterate++) {
+      fprintf_total_history(&total_history.saved_histories[history_iterate],fp);
+      // Garbage collection
+      if (total_history.saved_histories[history_iterate].used_elements > 0) free(total_history.saved_histories[history_iterate].elements);
+    }
+    fclose(fp);
   }
-  fprintf(fp,"----- Histories sorted after intensity ----------------------------------------------------------------------------------\n");
-  
-  for (history_iterate=0;history_iterate<total_history.used_elements;history_iterate++) {
-    fprintf_total_history(&total_history.saved_histories[history_iterate],fp);
-    // Garbage collection
-    if (total_history.saved_histories[history_iterate].used_elements > 0) free(total_history.saved_histories[history_iterate].elements);
-  }
-  fclose(fp);
-  
   )
-  
+
   // Garbage collection
   if (total_history.allocated_elements > 0) free(total_history.saved_histories);
-  
-  
+
+
 };
 
 
@@ -1709,7 +2062,7 @@ void write_tagging_tree(struct list_of_tagging_tree_node_pointers *master_list, 
 int clear_intersection_table(struct intersection_time_table_struct *intersection_time_table) {
     // Resets the intersection table when a scattering have occured.
     int iterate_volumes,iterate_solutions;
-    
+
     // Start at one because vacuum (0) does not have a listing in the intersection table
     for (iterate_volumes = 1;iterate_volumes < intersection_time_table->num_volumes;iterate_volumes++) {
         intersection_time_table->calculated[iterate_volumes] = 0;
@@ -1718,31 +2071,34 @@ int clear_intersection_table(struct intersection_time_table_struct *intersection
             intersection_time_table->intersection_times[iterate_volumes][iterate_solutions] = -1;
         }
     }
-    
+
     return 1;
 };
 
 void print_intersection_table(struct intersection_time_table_struct *intersection_time_table) {
     int num_volumes,iterate,solutions;
     int max_number_of_solutions = 0;
-    
+
     num_volumes = intersection_time_table->num_volumes;
-    
+
     for (iterate = 0;iterate < num_volumes;iterate++) {
         if (max_number_of_solutions < intersection_time_table->n_elements[iterate])
             max_number_of_solutions = intersection_time_table->n_elements[iterate];
     }
-    
+
     printf("------------------ INTERSECTION_TIME_TABLE -----------------");
     for (solutions = 2;solutions < max_number_of_solutions;solutions++) printf("------------");
     printf("\n");
-    
+
     // printf("iterate      |");
 
     printf("           ");
     printf("| CALCULATED  |");
     for (solutions = 0;solutions < max_number_of_solutions;solutions++) {
-        printf(" - SOLUTION %d - |",solutions);
+        printf(" - SOLUTION %d - |", solutions);
+    }
+    for (solutions = 0;solutions < max_number_of_solutions;solutions++) {
+        printf(" - SURFACE %d - |", solutions);
     }
 
     printf("\n");
@@ -1750,7 +2106,7 @@ void print_intersection_table(struct intersection_time_table_struct *intersectio
     // print iterate number
     printf("Volume %d   |",iterate);
     printf(" ---- %d ---- |",intersection_time_table->calculated[iterate]);
-    
+
         for (solutions = 0;solutions < max_number_of_solutions;solutions++) {
           if (intersection_time_table->n_elements[iterate] > solutions && intersection_time_table->calculated[iterate] == 1)
             if (intersection_time_table->intersection_times[iterate][solutions] > 0)
@@ -1760,29 +2116,50 @@ void print_intersection_table(struct intersection_time_table_struct *intersectio
           else
             printf("                |");
         }
+        for (solutions = 0;solutions < max_number_of_solutions;solutions++) {
+          if (intersection_time_table->n_elements[iterate] > solutions && intersection_time_table->calculated[iterate] == 1)
+             printf("   %1.9d   |",intersection_time_table->surface_index[iterate][solutions]);
+          else
+            printf("               |");
+        }
     printf("\n");
     }
     printf("------------------------------------------------------------");
     for (solutions = 2;solutions < max_number_of_solutions;solutions++) printf("------------");
     printf("\n");
-    
-    
+
+
     };
-    
+
 // -------------    Drawing functions   --------------------------------------------------------
 void merge_lines_to_draw(struct lines_to_draw *lines_master,struct lines_to_draw *lines_new) {
     if (lines_master->number_of_lines == 0) {
     lines_master->number_of_lines = lines_new->number_of_lines;
+    if (!lines_master->number_of_lines) {
+      return;
+    }
     lines_master->lines = malloc(lines_master->number_of_lines*sizeof(struct line_segment));
+    if (!lines_master->lines) {
+      fprintf(stderr,"Failure allocating list in Union function merge_lines_to_draw 2 - Exit!\n");
+      exit(EXIT_FAILURE);
+    }
     lines_master->lines = lines_new->lines;
     // One could free lines_new->lines;
     } else {
     int iterate;
     struct line_segment *temp_lines;
     temp_lines = malloc(lines_master->number_of_lines*sizeof(struct line_segment));
+    if (!temp_lines) {
+      fprintf(stderr,"Failure allocating list in Union function merge_lines_to_draw 3 - Exit!\n");
+      exit(EXIT_FAILURE);
+    }
     for (iterate = 0;iterate < lines_master->number_of_lines;iterate++) temp_lines[iterate] = lines_master->lines[iterate];
     free(lines_master->lines);
     lines_master->lines = malloc((lines_master->number_of_lines+lines_new->number_of_lines)*sizeof(struct line_segment));
+    if (!lines_master->lines) {
+      fprintf(stderr,"Failure allocating list in Union function merge_lines_to_draw 4 - Exit!\n");
+      exit(EXIT_FAILURE);
+    }
     for (iterate = 0;iterate < lines_master->number_of_lines;iterate++) lines_master->lines[iterate] = temp_lines[iterate];
     for (iterate = 0;iterate < lines_new->number_of_lines;iterate++) lines_master->lines[iterate+lines_master->number_of_lines] = lines_new->lines[iterate];
     lines_master->number_of_lines = lines_master->number_of_lines + lines_new->number_of_lines;
@@ -1796,8 +2173,8 @@ int r_has_highest_priority(Coords point,int N,struct geometry_struct **Geometrie
     // Returns 1 if no other volume has higher priority at the point
     // (not active) Returns a larger integer if the volume N is a mask, and the point is not in the volume it is masking,
     //  which results in the drawing function making that number of dashes
-    
-    
+
+
     int mask_status,*mask_start,*mask_check;
     // If the volume is a mask, it does not have a priority, and is always on top
     if (Geometries[N]->is_mask_volume == 1) {
@@ -1814,7 +2191,7 @@ int r_has_highest_priority(Coords point,int N,struct geometry_struct **Geometrie
       return 5;
       */
     }
-    
+
     // If the volume is a masked volume, check if the point is within it's masks
     if (Geometries[N]->is_masked_volume == 1) {
       if (Geometries[N]->mask_mode == 1) { // ALL mode, need to be within ALL masks
@@ -1836,12 +2213,12 @@ int r_has_highest_priority(Coords point,int N,struct geometry_struct **Geometrie
         }
       }
     }
-    
+
     int volume_index;
     double self_priority;
     self_priority = Geometries[N]->priority_value;
-    
-    
+
+
     for (volume_index = 1;volume_index<number_of_volumes;volume_index++) {
       if (volume_index != N && Geometries[volume_index]->is_mask_volume == 0) {
         if (Geometries[volume_index]->within_function(point,Geometries[volume_index])) {
@@ -1875,7 +2252,7 @@ int r_has_highest_priority(Coords point,int N,struct geometry_struct **Geometrie
     // printf("Volume %d did have highest priority at (%f,%f,%f) \n",N,point.x,point.y,point.z);
     return 1;
     }
-    
+
 void draw_line_positions(Coords point1,Coords point2) {
         //line(point1.x,point1.y,point1.z,point2.x,point2.y,point2.z);
         // sigh, can not use line in share. Need to save the information and pass to the mcdisplay part.
@@ -1889,64 +2266,82 @@ int Sample_compare_doubles (const void *a, const void *b) {
 }
 
 struct lines_to_draw draw_line_with_highest_priority(Coords position1,Coords position2,int N,struct geometry_struct **Geometries,int number_of_volumes,int max_number_of_solutions) {
-    
+
     int volume_index,iterate,permanent_list_length = 0;
     int number_of_solutions;
     double *temp_intersection=malloc(max_number_of_solutions*sizeof(double));
+    if (!temp_intersection) {
+      fprintf(stderr,"Failure allocating list in Union function lines_to_draw 1 - Exit!\n");
+      exit(EXIT_FAILURE);
+    }
     double r1[3],r2[3],direction[3];
     struct pointer_to_1d_double_list intersection_list;
-    
+
     intersection_list.num_elements = 0;
-    
-    // double *permanent_intersection_list,*storage; // old ways
-    
+
     r1[0] = position1.x;
     r1[1] = position1.y;
     r1[2] = position1.z;
     r2[0] = position2.x;
     r2[1] = position2.y;
     r2[2] = position2.z;
-    
-    // printf("r1 = (%f,%f,%f) \n",r1[0],r1[1],r1[2]);
-    // printf("r2 = (%f,%f,%f) \n",r2[0],r2[1],r2[2]);
-    
+
     direction[0] = r2[0] - r1[0];
     direction[1] = r2[1] - r1[1];
     direction[2] = r2[2] - r1[2];
     int geometry_output;
     
+    // Todo: switch to nicer intersect function call
+    double *double_dummy = malloc(max_number_of_solutions*sizeof(double));
+    int *int_dummy = malloc(max_number_of_solutions*sizeof(int));
+    // We need a storing pointer for the reallocs, to ensure that on realloc fail
+    // All is handled correctly
+    double *tmp;
+    int *tmpint;
+	
     // Find intersections
     for (volume_index = 1;volume_index < number_of_volumes; volume_index++) {
         if (volume_index != N) {
-            geometry_output = Geometries[volume_index]->intersect_function(temp_intersection,&number_of_solutions,r1,direction,Geometries[volume_index]);
-             // printf("No solutions for intersection (Volume %d) with %d \n",N,volume_index);
+         if (Geometries[volume_index]->eShape==mesh){
+            tmp = realloc(double_dummy, sizeof(double)*1000);
+            tmpint = realloc(int_dummy, sizeof(double)*1000);
+            if ( tmp==NULL || tmpint==NULL ) { 
+              free(tmp); 
+              free(tmpint);
+              printf("\nERROR: Realloc failed on double dummy");
+              exit(1);
+            } else {
+              double_dummy = tmp;
+              int_dummy = tmpint;
+              tmp = realloc(temp_intersection, sizeof(double)*1000);
+              if ( tmp == NULL){
+                free(tmp);
+                printf("\nERROR: Realloc failed on temp intersection");
+                exit(1);
+              } else{ temp_intersection = tmp;}
+            }
+         }
+            geometry_output = Geometries[volume_index]->intersect_function(temp_intersection, double_dummy, double_dummy, double_dummy, int_dummy, 
+			                                                               &number_of_solutions, r1, direction, Geometries[volume_index]);
                 for (iterate=0;iterate<number_of_solutions;iterate++) {
-                    // print_1d_double_list(intersection_list,"intersection_list");
                     if (temp_intersection[iterate] > 0 && temp_intersection[iterate] < 1) {
-                        add_element_to_double_list(&intersection_list,temp_intersection[iterate]);
-                        // printf("solution taken = %f\n",temp_intersection[iterate]);
-                        }                         // printf("solution ignored = %f\n",temp_intersection[iterate]);
-                    // print_1d_double_list(intersection_list,"intersection_list");
-                
+		      add_element_to_double_list(&intersection_list,temp_intersection[iterate]);
+		    }
                 }
-                // printf("First (%d) solutions added to the solution stack, intersection with %d \n",number_of_solutions,volume_index);
-                // printf(" Solutions: ");
-                // for (iterate = 0;iterate < intersection_list.num_elements;iterate++) printf("%f ",intersection_list.elements[iterate]);
-                // printf("\n");
-            
         }
     }
+    free(double_dummy);
     free(temp_intersection);
     // Now we have a list of intersection distances between r1 and r2 and all volumes.
     // This list needs to be sorted before we continue!
-    
+
     qsort(intersection_list.elements,intersection_list.num_elements,sizeof (double), Sample_compare_doubles);
-    // print_1d_double_list(intersection_list,"after sorting");
-    // printf(" Solutions (after sorting): ");
-    // for (iterate = 0;iterate < intersection_list.num_elements;iterate++) printf("%f ",intersection_list.elements[iterate]);
-    // printf("\n");
     
     Coords *points=malloc((intersection_list.num_elements+2)*sizeof(Coords));
+    if (!points) {
+      fprintf(stderr,"Failure allocating list in Union function lines_to_draw 2 - Exit!\n");
+      exit(EXIT_FAILURE);
+    }
     points[0] = coords_set(r1[0],r1[1],r1[2]);
     points[intersection_list.num_elements+1] = coords_set(r2[0],r2[1],r2[2]);
     for (iterate = 1;iterate < intersection_list.num_elements+1;iterate++) {
@@ -1954,40 +2349,43 @@ struct lines_to_draw draw_line_with_highest_priority(Coords position1,Coords pos
         points[iterate].y = r1[1] + direction[1]*intersection_list.elements[iterate-1];
         points[iterate].z = r1[2] + direction[2]*intersection_list.elements[iterate-1];
     }
-    
-    // printf("Points on the list:\n");
-    // for (iterate = 0;iterate < intersection_list.num_elements + 2;iterate++) {
-    // //         printf("(%f,%f,%f)\n",points[iterate].x,points[iterate].y,points[iterate].z);
-    // }
-    // printf("\n");
   
     struct line_segment *lines=malloc((intersection_list.num_elements+1)*sizeof(struct line_segment));
+    if (!lines) {
+      fprintf(stderr,"Failure allocating list in Union function lines_to_draw 3 - Exit!\n");
+      exit(EXIT_FAILURE);
+    }
     int *draw_logic=malloc((intersection_list.num_elements+1)*sizeof(int));
-    //struct lines_to_draw draw_order;
+    if (!draw_logic) {
+      fprintf(stderr,"Failure allocating list in Union function lines_to_draw 4 - Exit!\n");
+      exit(EXIT_FAILURE);
+    }
     Coords midpoint;
     struct lines_to_draw draw_order;
     draw_order.number_of_lines = 0;
-    
-    // printf("test2 in function \n");
+    draw_order.lines=NULL;
+
     int number_of_dashes;
-    
+
     for (iterate = 0;iterate < intersection_list.num_elements + 1;iterate++) {
         lines[iterate].point1 = points[iterate];
         lines[iterate].point2 = points[iterate+1];
         midpoint.x = 0.5*(lines[iterate].point1.x + lines[iterate].point2.x);
         midpoint.y = 0.5*(lines[iterate].point1.y + lines[iterate].point2.y);
         midpoint.z = 0.5*(lines[iterate].point1.z + lines[iterate].point2.z);
-        
+
         if ((number_of_dashes = r_has_highest_priority(midpoint,N,Geometries,number_of_volumes)) != 0) {
             draw_order.number_of_lines++;
             draw_logic[iterate] = number_of_dashes;
         } else draw_logic[iterate] = 0;
     }
-   
-    // printf("test3 in function \n");
-    
+
     if (draw_order.number_of_lines > 0) {
         draw_order.lines = malloc(draw_order.number_of_lines*sizeof(struct line_segment));
+	if (!draw_order.lines) {
+	  fprintf(stderr,"Failure allocating list in Union function lines_to_draw 5 - Exit!\n");
+	  exit(EXIT_FAILURE);
+	}
         draw_order.number_of_lines = 0;
         for (iterate = 0;iterate < intersection_list.num_elements + 1;iterate++) {
             if (draw_logic[iterate] != 0) {
@@ -1997,8 +2395,7 @@ struct lines_to_draw draw_line_with_highest_priority(Coords position1,Coords pos
         }
         if (intersection_list.num_elements > 0) free(intersection_list.elements);
     }
-
-    // printf("function done \n");
+    
     free(points);
     free(lines);
     free(draw_logic);
@@ -2015,7 +2412,7 @@ struct lines_to_draw draw_circle_with_highest_priority(Coords center,Coords vect
     vector.y /= vector_length;
     vector.z /= vector_length;
     // print_position(vector,"start vector normalized");
-    
+
     // Create a vector from the center of the circle to a point on the circumference by cross product
     double cross_input[3] = {0,1,0};
     // In case the cross input is parallel with the vector, a new is chosen. Both can't be parallel.
@@ -2023,26 +2420,22 @@ struct lines_to_draw draw_circle_with_highest_priority(Coords center,Coords vect
         cross_input[0] = 1; cross_input[1] = 0; cross_input[2] = 0;
     }
     // print_position(make_position(cross_input),"cross input");
-    
+
     double cross_product1[3] = {0,0,0};
     vec_prod(cross_product1[0],cross_product1[1],cross_product1[2],vector.x,vector.y,vector.z,cross_input[0],cross_input[1],cross_input[2]);
-    
+
     // print_position(make_position(cross_product1),"cross_product1");
-    
+
     double cross_length = length_of_3vector(cross_product1);
-    
-    // printf("cross_length = %f \n",cross_length);
-    
+
     cross_product1[0] /= cross_length;
     cross_product1[1] /= cross_length;
     cross_product1[2] /= cross_length;
-    
+
     cross_product1[0] *= radius;
     cross_product1[1] *= radius;
     cross_product1[2] *= radius;
-    
-    // printf("cross_product1 = (%f,%f,%f) \n",cross_product1[0],cross_product1[1],cross_product1[2]);
-    
+
     int iterate;
     double rotate_angle;
     Coords radial_position,old_radial_position;
@@ -2053,15 +2446,13 @@ struct lines_to_draw draw_circle_with_highest_priority(Coords center,Coords vect
     old_radial_position.y = center.y + cross_product1[1];
     old_radial_position.z = center.z + cross_product1[2];
 
-    // printf("old_radial_position = (%f,%f,%f) \n",old_radial_position.x,old_radial_position.y,old_radial_position.z);
-    
     for (iterate = 0;iterate < number_of_positions-1;iterate++) {
         rotate_angle = 2*3.14159*((double) iterate + 1.0)/((double) number_of_positions);
         rotate(radial_position.x,radial_position.y,radial_position.z,cross_product1[0],cross_product1[1],cross_product1[2],rotate_angle,vector.x,vector.y,vector.z);
         radial_position.x += center.x;
         radial_position.y += center.y;
         radial_position.z += center.z;
-        
+
         // Use the draw_lines_with_highest_priority to draw get draw_orders for each line piece
         temp_draw_order = draw_line_with_highest_priority(radial_position,old_radial_position,N,Geometries,number_of_volumes,max_number_of_solutions);
        // Assemble these draw_orders to one large draw order
@@ -2071,7 +2462,7 @@ struct lines_to_draw draw_circle_with_highest_priority(Coords center,Coords vect
         old_radial_position.y = radial_position.y;
         old_radial_position.z = radial_position.z;
     }
-    
+
     radial_position.x = center.x + cross_product1[0];
     radial_position.y = center.y + cross_product1[1];
     radial_position.z = center.z + cross_product1[2];
@@ -2079,10 +2470,10 @@ struct lines_to_draw draw_circle_with_highest_priority(Coords center,Coords vect
     temp_draw_order = draw_line_with_highest_priority(radial_position,old_radial_position,N,Geometries,number_of_volumes,max_number_of_solutions);
     // Assemble these draw_orders to one large draw order
     merge_lines_to_draw(&return_draw_order,&temp_draw_order);
-    
+
     // clean up
     if (temp_draw_order.number_of_lines > 0) free(temp_draw_order.lines);
-    
+
     // return the large draw order.
     return return_draw_order;
     }
@@ -2102,19 +2493,19 @@ struct lines_to_draw draw_circle_with_highest_priority(Coords center,Coords vect
  *  geometry is within the same file.
  *
  * To add a new geometry one needs to:
- *  Write a geometry_storage_struct that contains the paramters needed to describe the geometry
+ *  Write a geometry_storage_struct that contains the parameters needed to describe the geometry
  *  Add a pointer to this storage type in the geometry_parameter_union
  *  Write a function for intersection with line, using the same input scheme as for the others
  *  Write a function checking if a point is within the geometry
  *  Write a function checking if one instance of the geometry overlaps with another
  *  Write a function checking if one instance of the geometry is inside another
- *  For each exsisting geometry: 
- *      Write a function checking if an instance of this geometry overlaps with an instance of the exsisting
- *      Write a function checking if an instance of this geometry is inside an instance of the exsisting
+ *  For each existing geometry: 
+ *      Write a function checking if an instance of this geometry overlaps with an instance of the existing
+ *      Write a function checking if an instance of this geometry is inside an instance of the existing
  *      Write a function checking if an instance of an existing geometry is inside an instance of this geometry
  *
  *  Add these functions to geometry to the logic at the end of this file
- *  Write a component file similar to the exsisting ones, taking the input from the instrument file, and sending
+ *  Write a component file similar to the existing ones, taking the input from the instrument file, and sending
  *   it on to the master component.
 */
 
@@ -2150,21 +2541,15 @@ Coords direction_vector;
 
 struct mesh_storage{
 int n_facets;
-int counter;
-double v1_x[50000];
-double v1_y[50000];
-double v1_z[50000];
-double v2_x[50000];
-double v2_y[50000];
-double v2_z[50000];
-double v3_x[50000];
-double v3_y[50000];
-double v3_z[50000];
-double normal_x[50000];
-double normal_y[50000];
-double normal_z[50000];
+int n_verts;
+double *normal_x;
+double *normal_y;
+double *normal_z;
 Coords direction_vector;
 Coords Bounding_Box_Center;
+Coords *vertices;
+int **facets;
+double Bounding_Box_Extremes[6];
 double Bounding_Box_Radius;
 };
 
@@ -2187,6 +2572,10 @@ union geometry_parameter_union allocate_box_storage_copy(union geometry_paramete
   union geometry_parameter_union union_output;
   // Allocate the space for a cylinder_storage structe in the new union_output (union as the c structre)
   union_output.p_box_storage = malloc(sizeof(struct box_storage));
+  if (!union_output.p_box_storage) {
+    fprintf(stderr,"Failure allocating list in Union function allocate_box_storage_copy - Exit!\n");
+    exit(EXIT_FAILURE);
+  }
   // Copy the input storage to the output
   *union_output.p_box_storage = *union_input->p_box_storage;
   
@@ -2198,6 +2587,10 @@ union geometry_parameter_union allocate_cylinder_storage_copy(union geometry_par
   union geometry_parameter_union union_output;
   // Allocate the space for a cylinder_storage structe in the new union_output (union as the c structre)
   union_output.p_cylinder_storage = malloc(sizeof(struct cylinder_storage));
+  if (!union_output.p_cylinder_storage) {
+    fprintf(stderr,"Failure allocating list in Union function allocate_cylinder_storage_copy - Exit!\n");
+    exit(EXIT_FAILURE);
+  }
   // Copy the input storage to the output
   *union_output.p_cylinder_storage = *union_input->p_cylinder_storage;
   
@@ -2208,6 +2601,10 @@ union geometry_parameter_union allocate_sphere_storage_copy(union geometry_param
   union geometry_parameter_union union_output;
   // Allocate the space for a cylinder_storage structe in the new union_output (union as the c structre)
   union_output.p_sphere_storage = malloc(sizeof(struct sphere_storage));
+  if (!union_output.p_sphere_storage) {
+    fprintf(stderr,"Failure allocating list in Union function allocate_sphere_storage_copy - Exit!\n");
+    exit(EXIT_FAILURE);
+  }
   // Copy the input storage to the output
   *union_output.p_sphere_storage = *union_input->p_sphere_storage;
   
@@ -2218,6 +2615,10 @@ union geometry_parameter_union allocate_cone_storage_copy(union geometry_paramet
   union geometry_parameter_union union_output;
   // Allocate the space for a cone_storage structe in the new union_output (union as the c structre)
   union_output.p_cone_storage = malloc(sizeof(struct cone_storage));
+  if (!union_output.p_cone_storage) {
+    fprintf(stderr,"Failure allocating list in Union function allocate_cone_storage_copy - Exit!\n");
+    exit(EXIT_FAILURE);
+  }
   // Copy the input storage to the output
   *union_output.p_cone_storage = *union_input->p_cone_storage;
   
@@ -2228,6 +2629,10 @@ union geometry_parameter_union allocate_mesh_storage_copy(union geometry_paramet
   union geometry_parameter_union union_output;
   // Allocate the space for a mesh_storage structe in the new union_output (union as the c structre)
   union_output.p_mesh_storage = malloc(sizeof(struct mesh_storage));
+  if (!union_output.p_mesh_storage) {
+    fprintf(stderr,"Failure allocating list in Union function allocate_mesh_storage_copy - Exit!\n");
+    exit(EXIT_FAILURE);
+  }
   // Copy the input storage to the output
   *union_output.p_mesh_storage = *union_input->p_mesh_storage;
   
@@ -2308,7 +2713,7 @@ int A_within_B(struct geometry_struct *child, struct geometry_struct *parent, in
   
   if (shell_points.num_elements > resolution || shell_points.num_elements < 0) {
     printf("\nERROR: Shell point function used in A_within_B return garbage num_elements. \n");
-    exit(1);
+    exit(EXIT_FAILURE);
   }
   
   int iterate;
@@ -2331,12 +2736,11 @@ int mesh_A_within_B(struct geometry_struct *child, struct geometry_struct *paren
   // If all points on the shell of geometry A is within B, so are all lines between them.
   // This is modified so resolution is not set manually, but all mesh shell points are taken
   
-  printf("shell points mesh A within B \n");
   // resolution selects the number of points to be generated on the shell.
   struct pointer_to_1d_coords_list shell_points;
-  shell_points = child->shell_points(child, 1); // mesh shell points do not use max points
+  int resolution = 300;
+  shell_points = child->shell_points(child, resolution); // mesh shell points do not use max points
   // Shell_points.elements need to be freed before leaving this function
-  //printf("\n GOT OUT TEST");
   int iterate;
   
   for (iterate=0;iterate<shell_points.num_elements;iterate++) {
@@ -2389,7 +2793,7 @@ int A_overlaps_B(struct geometry_struct *child, struct geometry_struct *parent) 
 
 // -------------    Functions for box ray tracing used in trace ---------------------------------
 // These functions needs to be fast, as they may be used many times for each ray
-int sample_box_intersect_advanced(double *t,int *num_solutions,double *r,double *v,struct geometry_struct *geometry) {
+int sample_box_intersect_advanced(double *t, double *nx, double *ny, double *nz, int *surface_index, int *num_solutions,double *r,double *v,struct geometry_struct *geometry) {
     // possible approaches
     // rotate to a simple coordinate system by rotating the ray (easier to switch to McStas standard)
     
@@ -2438,7 +2842,11 @@ int sample_box_intersect_advanced(double *t,int *num_solutions,double *r,double 
     z_result = rotated_coordinates.z + t[*num_solutions]*rotated_velocity.z; // only for debug
     //printf("Test solution for face number 0: (x,y) = (%f,%f,%f)\n",x_result,y_result,z_result);
     if (x_result >= -0.5*width1 && x_result <= 0.5*width1 && y_result >= -0.5*height1 && y_result <= 0.5*height1) {
-        (*num_solutions)++;
+		nx[*num_solutions] = normal_vectors.x;
+		ny[*num_solutions] = normal_vectors.y;
+		nz[*num_solutions] = -normal_vectors.z;
+		surface_index[*num_solutions] = 0;
+        (*num_solutions)++;		
         //printf("Solution found for face number 0\n");
     }
     
@@ -2451,7 +2859,11 @@ int sample_box_intersect_advanced(double *t,int *num_solutions,double *r,double 
     //z_result = rotated_coordinates.z + t[*num_solutions]*rotated_velocity.z; // only for debug
     //printf("Test solution for face number 1: (x,y) = (%f,%f,%f)\n",x_result,y_result,z_result);
     if (x_result >= -0.5*width2 && x_result <= 0.5*width2 && y_result >= -0.5*height2 && y_result <= 0.5*height2) {
-        (*num_solutions)++;
+		nx[*num_solutions] = normal_vectors.x;
+		ny[*num_solutions] = normal_vectors.y;
+		nz[*num_solutions] = normal_vectors.z;
+		surface_index[*num_solutions] = 1;				
+        (*num_solutions)++;		
         //printf("Solution found for face number 1\n");
     }
     // These were done first as they are fastest, and most likely to be the solutions (normal to do small depth and large width/height), and standard orientation is to have one of these faces towards the source. When the fastest and most likely are done first, there is larger chance to skip more and slower calculations
@@ -2464,7 +2876,11 @@ int sample_box_intersect_advanced(double *t,int *num_solutions,double *r,double 
         y_result = rotated_coordinates.y + t[*num_solutions]*rotated_velocity.y;
         z_result = rotated_coordinates.z + t[*num_solutions]*rotated_velocity.z;
         if (z_result > -0.5*depth && z_result < 0.5*depth && y_result >= -0.5*(height1+(height2-height1)*(0.5*depth+z_result)/depth) && y_result < 0.5*(height1+(height2-height1)*(0.5*depth+z_result)/depth)) {
-            (*num_solutions)++;
+			nx[*num_solutions] = normal_vectors.x;
+			ny[*num_solutions] = normal_vectors.y;
+			nz[*num_solutions] = normal_vectors.z;	
+			surface_index[*num_solutions] = 2;					
+            (*num_solutions)++;			
             //printf("Solution found for face number 2\n");
         }
     }
@@ -2477,7 +2893,11 @@ int sample_box_intersect_advanced(double *t,int *num_solutions,double *r,double 
         y_result = rotated_coordinates.y + t[*num_solutions]*rotated_velocity.y;
         z_result = rotated_coordinates.z + t[*num_solutions]*rotated_velocity.z;
         if (z_result > -0.5*depth && z_result < 0.5*depth && y_result > -0.5*(height1+(height2-height1)*(0.5*depth+z_result)/depth) && y_result <= 0.5*(height1+(height2-height1)*(0.5*depth+z_result)/depth)) {
-            (*num_solutions)++;
+			nx[*num_solutions] = normal_vectors.x;
+			ny[*num_solutions] = normal_vectors.y;
+			nz[*num_solutions] = normal_vectors.z;
+			surface_index[*num_solutions] = 3;						
+            (*num_solutions)++;			
             //printf("Solution found for face number 3\n");
         }
     }
@@ -2490,7 +2910,11 @@ int sample_box_intersect_advanced(double *t,int *num_solutions,double *r,double 
         //y_result = rotated_coordinates.y + t[*num_solutions]*rotated_velocity.y;
         z_result = rotated_coordinates.z + t[*num_solutions]*rotated_velocity.z;
         if (z_result > -0.5*depth && z_result < 0.5*depth && x_result >= -0.5*(width1+(width2-width1)*(0.5*depth+z_result)/depth) && x_result < 0.5*(width1+(width2-width1)*(0.5*depth+z_result)/depth)) {
-            (*num_solutions)++;
+			nx[*num_solutions] = normal_vectors.x;
+			ny[*num_solutions] = normal_vectors.y;
+			nz[*num_solutions] = normal_vectors.z;
+			surface_index[*num_solutions] = 4;			
+            (*num_solutions)++;			
             //printf("Solution found for face number 4\n");
         }
     }
@@ -2503,21 +2927,63 @@ int sample_box_intersect_advanced(double *t,int *num_solutions,double *r,double 
         //y_result = rotated_coordinates.y + t[*num_solutions]*rotated_velocity.y;
         z_result = rotated_coordinates.z + t[*num_solutions]*rotated_velocity.z;
         if (z_result > -0.5*depth && z_result < 0.5*depth && x_result > -0.5*(width1+(width2-width1)*(0.5*depth+z_result)/depth) && x_result <= 0.5*(width1+(width2-width1)*(0.5*depth+z_result)/depth)) {
-            (*num_solutions)++;
+			nx[*num_solutions] = normal_vectors.x;
+			ny[*num_solutions] = normal_vectors.y;
+			nz[*num_solutions] = normal_vectors.z;
+			surface_index[*num_solutions] = 5;						
+            (*num_solutions)++;			
             //printf("Solution found for face number 5\n");
         }
     }
-    
+	
+	Coords normal_vector_rotated;
+	Coords normal_vector;
+	
+	// Sort solution according to intersection time and rotate normal vectors to master coordinate system 
     switch(*num_solutions) {
     case 2:
         if (t[0] > t[1]) {
             double temp = t[1];
             t[1] = t[0];
             t[0] = temp;
+			
+			// Also switch the normal vectors
+			temp = nx[1];
+			nx[1] = nx[0];
+			nx[0] = temp;
+			
+			temp = ny[1];
+			ny[1] = ny[0];
+			ny[0] = temp;
+			
+			temp = nz[1];
+			nz[1] = nz[0];
+			nz[0] = temp;
+			
+			// Switch surface_index
+			int temp_int = surface_index[1];
+			surface_index[1] = surface_index[0];
+			surface_index[0] = temp_int;
         }
+		
+		// Rotate back to master coordinate system	
+		normal_vector_rotated = coords_set(nx[0], ny[0], nz[0]);
+	    normal_vector = rot_apply(geometry->rotation_matrix, normal_vector_rotated);
+		nx[0] = normal_vector.x; ny[0] = normal_vector.y; nz[0] = normal_vector.z;
+		
+		normal_vector_rotated = coords_set(nx[1], ny[1], nz[1]);
+	    normal_vector = rot_apply(geometry->rotation_matrix, normal_vector_rotated);
+		nx[1] = normal_vector.x; ny[1] = normal_vector.y; nz[1] = normal_vector.z;		
+		
         return 1;
     case 1:
         t[1] = -1;
+		
+		// Rotate back to master coordinate system	
+		normal_vector_rotated = coords_set(nx[0], ny[0], nz[0]);
+	    normal_vector = rot_apply(geometry->rotation_matrix, normal_vector_rotated);
+		nx[0] = normal_vector.x; ny[0] = normal_vector.y; nz[0] = normal_vector.z;
+		
         return 1;
     case 0:
         t[0] = -1;
@@ -2583,11 +3049,11 @@ void box_corners_local_frame(Coords *corner_points, struct geometry_struct *geom
     corner_points[7] = coords_add(corner_points[4],coords_scalar_mult(y_vector,height2));
 };
 
-int sample_box_intersect_simple(double *t,int *num_solutions,double *r,double *v,struct geometry_struct *geometry) {
+int sample_box_intersect_simple(double *t, double *nx, double *ny, double *nz, int *surface_index, int *num_solutions, double *r, double *v, struct geometry_struct *geometry) {
     double width = geometry->geometry_parameters.p_box_storage->x_width1;
     double height = geometry->geometry_parameters.p_box_storage->y_height1;
     double depth = geometry->geometry_parameters.p_box_storage->z_depth;
-    
+	
     // Declare variables for the function
     double x_new,y_new,z_new;
     
@@ -2598,28 +3064,83 @@ int sample_box_intersect_simple(double *t,int *num_solutions,double *r,double *v
     
     Coords coordinates = coords_set(x_new,y_new,z_new);
     Coords rotated_coordinates;
-    // printf("Cords coordinates = (%f,%f,%f)\n",coordinates.x,coordinates.y,coordinates.z);
     
     // Rotate the position of the neutron around the center of the cylinder
     rotated_coordinates = rot_apply(geometry->transpose_rotation_matrix,coordinates);
-    // rotated_coordinates = rot_apply(rotation_matrix_debug,coordinates);
-    //     printf("Cords rotated_coordinates = (%f,%f,%f)\n",rotated_coordinates.x,rotated_coordinates.y,rotated_coordinates.z);
-    
+
     Coords velocity = coords_set(v[0],v[1],v[2]);
     Coords rotated_velocity;
-    //     printf("Cords velocity = (%f,%f,%f)\n",velocity.x,velocity.y,velocity.z);
-    
+
     // Rotate the position of the neutron around the center of the cylinder
     rotated_velocity = rot_apply(geometry->transpose_rotation_matrix,velocity);
-    // rotated_velocity = rot_apply(rotation_matrix_debug,velocity);
-    //     printf("Cords rotated_velocity = (%f,%f,%f)\n",rotated_velocity.x,rotated_velocity.y,rotated_velocity.z);
     
-    int output;
-    // Run McStas built in sphere intersect funtion (sphere centered around origin)
+    int output = 0;
+    // Run McStas built in box intersect funtion (box centered around origin)
     if ((output = box_intersect(&t[0],&t[1],rotated_coordinates.x,rotated_coordinates.y,rotated_coordinates.z,rotated_velocity.x,rotated_velocity.y,rotated_velocity.z,width,height,depth)) == 0) {
-        *num_solutions = 0;t[0]=-1;t[1]=-1;}
+        *num_solutions = 0;t[0]=-1;t[1]=-1;
+	}
     else if (t[1] != 0) *num_solutions = 2;
     else {*num_solutions = 1;t[1]=-1;} // t[2] is a memory error!
+	
+    // Rewritten code from refractor.comp
+    int index;
+    double x, y, z, dt;
+    double rotated_nx, rotated_ny, rotated_nz;
+    Coords normal_vector_rotated;
+    Coords normal_vector;
+    for (index=0; index<*num_solutions; index++) {
+
+        dt = t[index];
+        
+        // Intersection point in box coordinate system
+        x = rotated_coordinates.x + dt*rotated_velocity.x;
+        y = rotated_coordinates.y + dt*rotated_velocity.y;
+        z = rotated_coordinates.z + dt*rotated_velocity.z;
+        
+        // determine hit face: difference to plane is closest to 0 (in box coordinate system)
+		// A deviation of 0 means its on that surface, due to finite accuracy it will never be exact, so the closest is chosen
+		double x_deviation = fabs(fabs(x/width) - 0.5); 
+	    double y_deviation =  fabs(fabs(y/height) - 0.5);
+		double z_deviation = fabs(fabs(z/depth) - 0.5);
+		
+		if (x_deviation <= y_deviation && x_deviation <= z_deviation) {
+		    normal_vector_rotated = coords_set(x > 0 ? 1.0 : -1.0, 0.0, 0.0);
+		} else if (y_deviation <= x_deviation && y_deviation <= z_deviation) {
+		    normal_vector_rotated = coords_set(0.0, y > 0 ? 1.0 : -1.0, 0.0);
+		} else {
+		    normal_vector_rotated = coords_set(0.0, 0.0, z > 0 ? 1.0 : -1.0);
+		}
+		
+		// Set surface index
+		if (normal_vector_rotated.z < -0.5)
+			// back
+			surface_index[index] = 0;
+		else if(normal_vector_rotated.z > 0.5)
+			// front
+			surface_index[index] = 1;
+		else if(normal_vector_rotated.x > 0.5)
+			// left
+			surface_index[index] = 2;			
+		else if(normal_vector_rotated.x < -0.5)
+			// right
+			surface_index[index] = 3;			
+		else if(normal_vector_rotated.y > 0.5)
+			// top
+			surface_index[index] = 4;			
+		else if(normal_vector_rotated.y < -0.5)
+			// bottom
+			surface_index[index] = 5;
+		
+        // Rotate back to master coordinate system
+        normal_vector = rot_apply(geometry->rotation_matrix, normal_vector_rotated);
+		
+        // Set the normal vector components
+        nx[index] = normal_vector.x;
+        ny[index] = normal_vector.y;
+        nz[index] = normal_vector.z;
+		
+		NORM(nx[index], ny[index], nz[index]);
+    }
     
     return output;
 };
@@ -2707,7 +3228,7 @@ int r_within_cone(Coords pos,struct geometry_struct *geometry) {
     else return 1;
     };
 
-int sample_cone_intersect(double *t,int *num_solutions,double *r,double *v,struct geometry_struct *geometry) {
+int sample_cone_intersect(double *t, double *nx, double *ny, double *nz, int *surface_index, int *num_solutions, double *r, double *v, struct geometry_struct *geometry) {
 
     /*
     double radius_top = geometry->geometry_parameters.p_cone_storage->cone_radius_top;
@@ -2763,7 +3284,9 @@ int sample_cone_intersect(double *t,int *num_solutions,double *r,double *v,struc
     //     printf("Cords rotated_velocity = (%f,%f,%f)\n",rotated_velocity.x,rotated_velocity.y,rotated_velocity.z);
     
 
-    
+    Coords normal_vector_rotated;
+    Coords normal_vector;
+	    
     // Test if the ray gets close to the cone by making a sphere around cone and check intersection
     double Y;
     double max_r;
@@ -2783,7 +3306,7 @@ int sample_cone_intersect(double *t,int *num_solutions,double *r,double *v,struc
     double sphere_t[2];
     
     
-    int output;
+    int output = 0;
     // Run McStas built in sphere intersect funtion (sphere centered around origin)
     if ((output = sphere_intersect(&sphere_t[0],&sphere_t[1],x_sphere,y_sphere,z_sphere,v[0],v[1],v[2],sphere_radius)) == 0)
     
@@ -2795,11 +3318,8 @@ int sample_cone_intersect(double *t,int *num_solutions,double *r,double *v,struc
             return 0;
         }
     }
-    
-    
-    
+
     double tmp;
-    
 
     // Check if the ray intersects with the top and bottom circles
     double t_plane[2];
@@ -2811,12 +3331,23 @@ int sample_cone_intersect(double *t,int *num_solutions,double *r,double *v,struc
     double xpos;
     double zpos;
     xpos=rotated_coordinates.x+t_plane[0]*rotated_velocity.x;
-        zpos=rotated_coordinates.z+t_plane[0]*rotated_velocity.z;
+    zpos=rotated_coordinates.z+t_plane[0]*rotated_velocity.z;
  
 
     if ((xpos*xpos + zpos*zpos) > radius_top*radius_top){
         t_plane[0] = -1;
         *num_solutions = *num_solutions-1;
+    } else {
+		normal_vector_rotated = coords_set(0,1,0);
+			
+	    normal_vector = rot_apply(geometry->rotation_matrix, normal_vector_rotated);
+		
+	    // Set the normal vector components
+	    nx[0] = normal_vector.x;
+	    ny[0] = normal_vector.y;
+	    nz[0] = normal_vector.z;
+		
+		surface_index[0] = 1; // top index
     }
     xpos=rotated_coordinates.x+t_plane[1]*rotated_velocity.x;
     zpos=rotated_coordinates.z+t_plane[1]*rotated_velocity.z;
@@ -2824,22 +3355,54 @@ int sample_cone_intersect(double *t,int *num_solutions,double *r,double *v,struc
     if ((xpos*xpos + zpos*zpos) > radius_bottom*radius_bottom){
         t_plane[1] = -1;
         *num_solutions = *num_solutions-1;
+    } else {
+		normal_vector_rotated = coords_set(0,-1,0);
+			
+	    normal_vector = rot_apply(geometry->rotation_matrix, normal_vector_rotated);
+		
+	    // Set the normal vector components
+	    nx[1] = normal_vector.x;
+	    ny[1] = normal_vector.y;
+	    nz[1] = normal_vector.z;
+		
+		surface_index[1] = 2; // bottom index
+    }
+    
+    // sort solutions:
+    if (t_plane[0]>t_plane[1]){
+       tmp = t_plane[1];
+       t_plane[1] = t_plane[0];
+       t_plane[0] = tmp;
+	   
+	   // Also switch the normal vectors
+	   tmp = nx[1];
+ 	   nx[1] = nx[0];
+	   nx[0] = tmp;
+	
+	   tmp = ny[1];
+	   ny[1] = ny[0];
+	   ny[0] = tmp;
+	
+	   tmp = nz[1];
+	   nz[1] = nz[0];
+	   nz[0] = tmp;
+	
+	   // Switch surface_index
+	   int temp_int = surface_index[1];
+	   surface_index[1] = surface_index[0];
+	   surface_index[0] = temp_int;
     }
 
     
-    // sort solutions:
-        if (t_plane[0]>t_plane[1]){
-            tmp = t_plane[1];
-            t_plane[1] = t_plane[0];
-            t_plane[0] = tmp;
-        }
-
-    
+	double nx_cone[2], ny_cone[2], nz_cone[2];
+	int surface_index_cone[2];
+	double r_current;
+	double x, y, z, dt;
+	
     if (*num_solutions == 2){
         // Intersect only on planes
         t[0] = t_plane[0];
         t[1] = t_plane[1];
-        
         
     } else {
         // Intersects with cone
@@ -2858,9 +3421,67 @@ int sample_cone_intersect(double *t,int *num_solutions,double *r,double *v,struc
         // remove solutions on cone over top and under bottom
         if (fabs(t_cone[0]*rotated_velocity.y+rotated_coordinates.y) > height/2) {
             t_cone[0] = -1;
+        } else {
+	        dt = t_cone[0];
+        
+	        // Intersection point in cylinder coordinate system
+	        x = rotated_coordinates.x + dt*rotated_velocity.x;
+	        y = rotated_coordinates.y + dt*rotated_velocity.y;
+	        z = rotated_coordinates.z + dt*rotated_velocity.z;
+			
+			r_current = radius_top + ((y-0.5*height)/height)*(radius_top - radius_bottom);
+				
+			
+			if (radius_bottom==radius_top) {
+ 			    normal_vector_rotated = coords_set(x/r_current, 0.0, z/r_current);
+			} else {
+			    normal_vector_rotated = coords_set(x/r_current, (radius_bottom - radius_top)/height, z/r_current);
+			}
+
+			NORM(normal_vector_rotated.x, normal_vector_rotated.y, normal_vector_rotated.z);
+			
+	        // Rotate back to master coordinate system
+	        normal_vector = rot_apply(geometry->rotation_matrix, normal_vector_rotated);
+		
+	        // Set the normal vector components
+	        nx_cone[0] = normal_vector.x;
+	        ny_cone[0] = normal_vector.y;
+	        nz_cone[0] = normal_vector.z;
+			
+			surface_index_cone[0] = 0;
+			
         }
         if (fabs(t_cone[1]*rotated_velocity.y+rotated_coordinates.y) > height/2) {
             t_cone[1] = -1;
+		} else { 
+			
+		    dt = t_cone[1];
+			
+	        // Intersection point in cylinder coordinate system
+	        x = rotated_coordinates.x + dt*rotated_velocity.x;
+	        y = rotated_coordinates.y + dt*rotated_velocity.y;
+	        z = rotated_coordinates.z + dt*rotated_velocity.z;
+			
+			r_current = radius_top + ((y-0.5*height)/height)*(radius_top - radius_bottom);
+				
+			
+			if (radius_bottom==radius_top) {
+ 			    normal_vector_rotated = coords_set(x/r_current, 0.0, z/r_current);
+			} else {
+			    normal_vector_rotated = coords_set(x/r_current, (radius_bottom - radius_top)/height, z/r_current);
+			}
+
+			NORM(normal_vector_rotated.x, normal_vector_rotated.y, normal_vector_rotated.z);
+			
+	        // Rotate back to master coordinate system
+	        normal_vector = rot_apply(geometry->rotation_matrix, normal_vector_rotated);
+		
+	        // Set the normal vector components
+	        nx_cone[1] = normal_vector.x;
+	        ny_cone[1] = normal_vector.y;
+	        nz_cone[1] = normal_vector.z;
+			
+			surface_index_cone[1] = 0;			
         }
 
         
@@ -2869,37 +3490,75 @@ int sample_cone_intersect(double *t,int *num_solutions,double *r,double *v,struc
             tmp = t_cone[1];
             t_cone[1] = t_cone[0];
             t_cone[0] = tmp;
+			
+	 	   // Also switch the normal vectors
+	 	   tmp = nx_cone[1];
+	  	   nx_cone[1] = nx_cone[0];
+	 	   nx_cone[0] = tmp;
+	
+	 	   tmp = ny_cone[1];
+	 	   ny_cone[1] = ny_cone[0];
+	 	   ny_cone[0] = tmp;
+	
+	 	   tmp = nz_cone[1];
+	 	   nz_cone[1] = nz_cone[0];
+	 	   nz_cone[0] = tmp;
+	
+	 	   // Switch surface_index
+	 	   int temp_int = surface_index_cone[1];
+	 	   surface_index_cone[1] = surface_index_cone[0];
+	 	   surface_index_cone[0] = temp_int;
         }
         
         if (*num_solutions == 1){
             t[0] = t_cone[1];
+			nx[0] = nx_cone[1];
+			ny[0] = ny_cone[1];
+			nz[0] = nz_cone[1];
+			surface_index[0] = surface_index_cone[1];
+			
             t[1] = t_plane[1];
         }
         if (*num_solutions == 0){
             t[0] = t_cone[0];
+			nx[0] = nx_cone[0];
+			ny[0] = ny_cone[0];
+			nz[0] = nz_cone[0];
+			surface_index[0] = surface_index_cone[0];
+			
             t[1] = t_cone[1];
+			nx[1] = nx_cone[1];
+			ny[1] = ny_cone[1];
+			nz[1] = nz_cone[1];
+			surface_index[1] = surface_index_cone[1];
         }
     }
 
-
-    // Count solutions
-    *num_solutions = 0;
-    if (t[0] > 0){
-        *num_solutions += 1;
-    }else {
-        t[0]=-1;
-    }
-    if (t[1] > 0){
-        *num_solutions += 1;
-    }else {
-        t[1]=-1;
-    }
+	
+	*num_solutions = 2;
     
     
     if (t[0] > t[1]) {
         tmp = t[1];
         t[1] = t[0];
         t[0] = tmp;
+		
+ 	   tmp = nx[1];
+  	   nx[1] = nx[0];
+ 	   nx[0] = tmp;
+	
+ 	   tmp = ny[1];
+ 	   ny[1] = ny[0];
+ 	   ny[0] = tmp;
+	
+ 	   tmp = nz[1];
+ 	   nz[1] = nz[0];
+ 	   nz[0] = tmp;
+	
+ 	   // Switch surface_index
+ 	   int temp_int = surface_index[1];
+ 	   surface_index[1] = surface_index[0];
+ 	   surface_index[0] = temp_int;
     }
 switch(*num_solutions) {
     case 2:
@@ -2913,18 +3572,6 @@ switch(*num_solutions) {
         return 0;
 }
 
-
-
-/*
-    int output;
-    // Run McStas built in sphere intersect funtion (sphere centered around origin)
-    if ((output = cone_intersect(&t[0],&t[1],rotated_coordinates,rotated_velocity,radius_top,radius_bottom,height,is_cylinder,cone_tip,center)) == 0) {
-        *num_solutions = 0;t[0]=-1;t[1]=-1;}
-    else if (t[1] != 0) *num_solutions = 2;
-    else {*num_solutions = 1;t[1]=-1;}
- 
-    return output;
-*/
  // FIXME should we ever reach / return here?
  return -2;
 };
@@ -2974,522 +3621,269 @@ This function was created by Martin Olsen at NBI on september 20, 2018.
     return 0;
 };
 
-int r_within_mesh(Coords pos,struct geometry_struct *geometry) {
-// Unpack parameters
 
-    Coords center = geometry->center;
-    int n_facets = geometry->geometry_parameters.p_mesh_storage->n_facets;
-    double *normal_x = geometry->geometry_parameters.p_mesh_storage->normal_x;
-    double *normal_y = geometry->geometry_parameters.p_mesh_storage->normal_y;
-    double *normal_z = geometry->geometry_parameters.p_mesh_storage->normal_z;
-    double *v1_x = geometry->geometry_parameters.p_mesh_storage->v1_x;
-    double *v1_y = geometry->geometry_parameters.p_mesh_storage->v1_y;
-    double *v1_z = geometry->geometry_parameters.p_mesh_storage->v1_z;
-    double *v2_x = geometry->geometry_parameters.p_mesh_storage->v2_x;
-    double *v2_y = geometry->geometry_parameters.p_mesh_storage->v2_y;
-    double *v2_z = geometry->geometry_parameters.p_mesh_storage->v2_z;
-    double *v3_x = geometry->geometry_parameters.p_mesh_storage->v3_x;
-    double *v3_y = geometry->geometry_parameters.p_mesh_storage->v3_y;
-    double *v3_z = geometry->geometry_parameters.p_mesh_storage->v3_z;
-    
-    double x_new,y_new,z_new;
-    
-    // Coordinate transformation
-    x_new = pos.x - geometry->center.x;
-    y_new = pos.y - geometry->center.y;
-    z_new = pos.z - geometry->center.z;
-    
-    Coords coordinates = coords_set(x_new,y_new,z_new);
-    Coords rotated_coordinates;
-   
-    rotated_coordinates = rot_apply(geometry->transpose_rotation_matrix,coordinates);
-
-    
-    int verbal = 0;
-    // Generate unit direction vector along center axis of meshs
-    
-    // Start with vector that points along the mesh in the simple frame, and rotate to global
-    Coords simple_vector = coords_set(0,1,0);
-    Coords test_vector = coords_set(0,1,0);
-    // Check intersections with every single facet:
-    int iter =0;
-    int counter=0; int neg_counter=0;
-    Coords edge1,edge2,h,s,q,tmp,intersect_pos;
-    double UNION_EPSILON = 1e-27;
-    double this_facet_t;
-    double a,f,u,V;
-    //////printf("\n RWITHIN TEST 1ste");
-    for (iter = 0 ; iter < n_facets ; iter++){
-    /*//////printf("\n\n facet v1 = [%f,%f,%f]",v1_x[iter],v1_y[iter],v1_z[iter]);
-    //////printf("\n facet v2 = [%f,%f,%f]",v2_x[iter],v2_y[iter],v2_z[iter]);
-    //////printf("\n facet v3 = [%f,%f,%f]",v3_x[iter],v3_y[iter],v3_z[iter]);*/
-        // Intersection with face plane (Möller–Trumbore)
-        edge1 = coords_set(*(v2_x+iter)-*(v1_x+iter),*(v2_y+iter)-*(v1_y+iter),*(v2_z+iter)-*(v1_z+iter));
-            //////printf("\n edge 1 = [%f,%f,%f]",edge1.x,edge1.y,edge1.z);
-        edge2 = coords_set(*(v3_x+iter)-*(v1_x+iter),*(v3_y+iter)-*(v1_y+iter),*(v3_z+iter)-*(v1_z+iter));
-        
-        vec_prod(h.x,h.y,h.z,test_vector.x,test_vector.y,test_vector.z,edge2.x,edge2.y,edge2.z);
-        
-        a = Dot(edge1,h);
-        //////printf("\n a=%f",a);
-        if (a > -UNION_EPSILON && a < UNION_EPSILON){
-            //////printf("\n UNION_EPSILON fail");
-        } else{
-            f = 1.0/a;
-            s = coords_sub(rotated_coordinates, coords_set(*(v1_x+iter),*(v1_y+iter),*(v1_z+iter)));
-            u = f * (Dot(s,h));
-            if (u < 0.0 || u > 1.0){
-                //////printf("\n Nope 1");
-            }else{
-                //q = vec_prod(s,edge1);
-                vec_prod(q.x,q.y,q.z,s.x,s.y,s.z,edge1.x,edge1.y,edge1.z);
-                V = f * Dot(test_vector,q);
-                if (V < 0.0 || u + V > 1.0){
-                    //////printf("\n Nope 2");
-                } else {
-                    // At this stage we can compute t to find out where the intersection point is on the line.
-                    if (f* Dot(q,edge2) > 0){
-                        counter++;
-
-                    } else {
-                        neg_counter++;
-
-                    }
-                    if (fabs(f* Dot(q,edge2)) > UNION_EPSILON){
-                    } else { //printf("\n [%f %f %f] Failed due to being close to surface, E = %f",rotated_coordinates.x,rotated_coordinates.y,rotated_coordinates.z,f* Dot(q,edge2));
-                     }
-                    
-                    
-                    
-                }
-            }
-        }
-    }
-    int C1 = counter;
-    
-    int maxC; int sameNr =0;
-    ////printf("\n first iter: (%i , %i)",counter,neg_counter);
-    if (counter % 2 == neg_counter % 2){
-        maxC = counter;
-        sameNr = 1;
-    } else {
-        //printf("\n not the same intersection numbers (%i , %i)",counter,neg_counter);
-        maxC = counter;
-        sameNr = 0;
-    }
-
- if (sameNr == 0){
-     test_vector = coords_set(0,0,1);
-    iter =0;
-    counter=0;
-    //////printf("\n RWITHIN TEST 1ste");
-    for (iter = 0 ; iter < n_facets ; iter++){
-    ///////printf("\n\n facet v1 = [%f,%f,%f]",v1_x[iter],v1_y[iter],v1_z[iter]);
-    //////printf("\n facet v2 = [%f,%f,%f]",v2_x[iter],v2_y[iter],v2_z[iter]);
-    //////printf("\n facet v3 = [%f,%f,%f]",v3_x[iter],v3_y[iter],v3_z[iter]);
-        // Intersection with face plane (Möller–Trumbore)
-        edge1 = coords_set(*(v2_x+iter)-*(v1_x+iter),*(v2_y+iter)-*(v1_y+iter),*(v2_z+iter)-*(v1_z+iter));
-            //////printf("\n edge 1 = [%f,%f,%f]",edge1.x,edge1.y,edge1.z);
-        edge2 = coords_set(*(v3_x+iter)-*(v1_x+iter),*(v3_y+iter)-*(v1_y+iter),*(v3_z+iter)-*(v1_z+iter));
-        
-        vec_prod(h.x,h.y,h.z,test_vector.x,test_vector.y,test_vector.z,edge2.x,edge2.y,edge2.z);
-        
-        a = Dot(edge1,h);
-        //////printf("\n a=%f",a);
-        if (a > -UNION_EPSILON && a < UNION_EPSILON){
-            //////printf("\n UNION_EPSILON fail");
-        } else{
-            f = 1.0/a;
-            s = coords_sub(rotated_coordinates , coords_set(*(v1_x+iter),*(v1_y+iter),*(v1_z+iter)));
-            u = f * (Dot(s,h));
-            if (u < 0.0 || u > 1.0){
-                //////printf("\n Nope 1");
-            }else{
-                //q = vec_prod(s,edge1);
-                vec_prod(q.x,q.y,q.z,s.x,s.y,s.z,edge1.x,edge1.y,edge1.z);
-                V = f * Dot(test_vector,q);
-                if (V < 0.0 || u + V > 1.0){
-                    //////printf("\n Nope 2");
-                } else {
-                    // At this stage we can compute t to find out where the intersection point is on the line.
-
-                    if (f* Dot(q,edge2) > 0){
-                        counter++;
-
-                    } else {
-                        neg_counter++;
-
-                    }
-                    if (fabs(f* Dot(q,edge2)) > UNION_EPSILON){
-                    } else { printf("\n [%f %f %f] Failed due to being close to surface (2. iteration), E = %f",rotated_coordinates.x,rotated_coordinates.y,rotated_coordinates.z,f* Dot(q,edge2));
-                     }
-                    
-                    
-                    
-                }
-            }
-        }
-    }
-    }
-    
-    if (counter % 2 == neg_counter % 2){
-        maxC = counter;
-        sameNr = 1;
-    } else {
-        printf("\n not the same intersection numbers (%i , %i) second iteration",counter,neg_counter);
-        maxC = counter;
-        sameNr = 0;
-    }
-
-    if (sameNr == 0){
-     test_vector = coords_set(1,0,0);
-    iter =0;
-    counter=0;
-    //////printf("\n RWITHIN TEST 1ste");
-    for (iter = 0 ; iter < n_facets ; iter++){
-    ///////printf("\n\n facet v1 = [%f,%f,%f]",v1_x[iter],v1_y[iter],v1_z[iter]);
-    //////printf("\n facet v2 = [%f,%f,%f]",v2_x[iter],v2_y[iter],v2_z[iter]);
-    //////printf("\n facet v3 = [%f,%f,%f]",v3_x[iter],v3_y[iter],v3_z[iter]);
-        // Intersection with face plane (Möller–Trumbore)
-        edge1 = coords_set(*(v2_x+iter)-*(v1_x+iter),*(v2_y+iter)-*(v1_y+iter),*(v2_z+iter)-*(v1_z+iter));
-            //////printf("\n edge 1 = [%f,%f,%f]",edge1.x,edge1.y,edge1.z);
-        edge2 = coords_set(*(v3_x+iter)-*(v1_x+iter),*(v3_y+iter)-*(v1_y+iter),*(v3_z+iter)-*(v1_z+iter));
-        
-        vec_prod(h.x,h.y,h.z,test_vector.x,test_vector.y,test_vector.z,edge2.x,edge2.y,edge2.z);
-        
-        a = Dot(edge1,h);
-        //////printf("\n a=%f",a);
-        if (a > -UNION_EPSILON && a < UNION_EPSILON){
-            //////printf("\n UNION_EPSILON fail");
-        } else{
-            f = 1.0/a;
-            s = coords_sub(rotated_coordinates , coords_set(*(v1_x+iter),*(v1_y+iter),*(v1_z+iter)));
-            u = f * (Dot(s,h));
-            if (u < 0.0 || u > 1.0){
-                //////printf("\n Nope 1");
-            }else{
-                //q = vec_prod(s,edge1);
-                vec_prod(q.x,q.y,q.z,s.x,s.y,s.z,edge1.x,edge1.y,edge1.z);
-                V = f * Dot(test_vector,q);
-                if (V < 0.0 || u + V > 1.0){
-                    //////printf("\n Nope 2");
-                } else {
-                    // At this stage we can compute t to find out where the intersection point is on the line.
-
-                    if (f* Dot(q,edge2) > 0){
-                        counter++;
-
-                    } else {
-                        neg_counter++;
-
-                    }
-                    if (fabs(f* Dot(q,edge2)) > UNION_EPSILON){
-                    } else { printf("\n [%f %f %f] Failed due to being close to surface (3. iteration), E = %f",rotated_coordinates.x,rotated_coordinates.y,rotated_coordinates.z,f* Dot(q,edge2));
-                    }
-                    
-                    
-                    
-                }
-            }
-        }
-    }
-
-    }
-   
-    
-    if (counter % 2 == neg_counter % 2){
-        maxC = counter;
-    } else {
-        //printf("\n not the same intersection numbers (3. iteration) (%i , %i)",counter,neg_counter);
-        //printf("\n this point is a bitch: [%f %f %f]",rotated_coordinates.x,rotated_coordinates.y,rotated_coordinates.z);
-        return 0;
-        
-    }
-    ////printf("\n test point: [%f %f %f]",rotated_coordinates.x,rotated_coordinates.y,rotated_coordinates.z);
-
-////printf("\n maxC: %i",maxC);
-
-    if ( maxC % 2 == 0) {
-        ////printf("\n Even number of intersections,  %i",counter);
-        return 0;
-    }else{
-        ////printf("\n Odd number of intersections, INSIDE! %i",counter);
-        return 1;
-        
-    }
-    
-    return 0;
-    };
-
-
-int sample_mesh_intersect(double *t,int *num_solutions,double *r,double *v,struct geometry_struct *geometry) {
-
-    /*
-    double radius_top = geometry->geometry_parameters.p_mesh_storage->mesh_radius_top;
-    double radius_bottom = geometry->geometry_parameters.p_mesh_storage->mesh_radius_bottom;
-    double height = geometry->geometry_parameters.p_mesh_storage->height;
-    */
-
-
-    int n_facets = geometry->geometry_parameters.p_mesh_storage->n_facets;
-    double *normal_x = geometry->geometry_parameters.p_mesh_storage->normal_x;
-    double *normal_y = geometry->geometry_parameters.p_mesh_storage->normal_y;
-    double *normal_z = geometry->geometry_parameters.p_mesh_storage->normal_z;
-    double *v1_x = geometry->geometry_parameters.p_mesh_storage->v1_x;
-    double *v1_y = geometry->geometry_parameters.p_mesh_storage->v1_y;
-    double *v1_z = geometry->geometry_parameters.p_mesh_storage->v1_z;
-    double *v2_x = geometry->geometry_parameters.p_mesh_storage->v2_x;
-    double *v2_y = geometry->geometry_parameters.p_mesh_storage->v2_y;
-    double *v2_z= geometry->geometry_parameters.p_mesh_storage->v2_z;
-    double *v3_x = geometry->geometry_parameters.p_mesh_storage->v3_x;
-    double *v3_y = geometry->geometry_parameters.p_mesh_storage->v3_y;
-    double *v3_z = geometry->geometry_parameters.p_mesh_storage->v3_z;
-    Coords Bounding_Box_Center = geometry->geometry_parameters.p_mesh_storage->Bounding_Box_Center;
-    double Bounding_Box_Radius = geometry->geometry_parameters.p_mesh_storage->Bounding_Box_Radius;
-    
-    
-    int i;
-    
-    
-    
-    
-    
-    
-    //////printf("\n\n  TEST facet v2 = [%f,%f,%f]",v2_x[1],v2_y[1],v2_z[1]);
-    for (i = 0 ; i< n_facets ; i++){
-    
-    ////printf("\n\n  TEST facet v2 = [%f,%f,%f]",*(v2_x+i),*(v2_y+i),*(v2_z+i));
-    }
-    
-    
-    //Coords direction = geometry->geometry_parameters.p_mesh_storage->direction_vector;
-    Coords center = geometry->center;
-
-    Coords direction = coords_set(0,1,0);
-
-
-
-    //Coords bottom_point = coords_add(center,coords_scalar_mult(direction,-0.5*height));
-    //Coords top_point = coords_add(center,coords_scalar_mult(direction,0.5*height));
-
-    // Declare variables for the function
-    double x_new,y_new,z_new;
-    
-    // Coordinate transformation
-    x_new = r[0] - geometry->center.x;
-    y_new = r[1] - geometry->center.y;
-    z_new = r[2] - geometry->center.z;
-    
-    double x_bb,y_bb,z_bb;
-    /*
-    x_bb = r[0] - Bounding_Box_Center.x;
-    y_bb = r[1] - Bounding_Box_Center.y;
-    z_bb = r[2] - Bounding_Box_Center.z;
-    */
-    
-    x_bb = r[0] - Bounding_Box_Center.x - geometry->center.x;
-    y_bb = r[1] - Bounding_Box_Center.y - geometry->center.y;
-    z_bb = r[2] - Bounding_Box_Center.z - geometry->center.z;
-    
-    Coords coordinates = coords_set(x_new,y_new,z_new);
-    Coords rotated_coordinates;
-    // ////printf("Cords coordinates = (%f,%f,%f)\n",coordinates.x,coordinates.y,coordinates.z);
-    
-    // debug
-    // Rotation rotation_matrix_debug[3][3];
-    // rot_set_rotation(rotation_matrix_debug,-1.0*geometry->rotation.x,-1.0*geometry->rotation.y,-1.0*geometry->rotation.z);
-    // rot_transpose(geometry->rotation_matrix,rotation_matrix_debug);
-
-    // Rotate the position of the neutron around the center of the mesh
-    rotated_coordinates = rot_apply(geometry->transpose_rotation_matrix,coordinates);
-    // rotated_coordinates = rot_apply(rotation_matrix_debug,coordinates);
-    //     ////printf("Cords rotated_coordinates = (%f,%f,%f)\n",rotated_coordinates.x,rotated_coordinates.y,rotated_coordinates.z);
-    
-    Coords bounding_box_coordinates = coords_set(x_bb, y_bb, z_bb);
-    Coords bounding_box_rotated_coordinates;
-    
-    bounding_box_rotated_coordinates = rot_apply(geometry->transpose_rotation_matrix,bounding_box_coordinates);
-    
-    
-    Coords velocity = coords_set(v[0],v[1],v[2]);
-    Coords rotated_velocity;
-    //     ////printf("Cords velocity = (%f,%f,%f)\n",velocity.x,velocity.y,velocity.z);
-    
-    // Rotate the position of the neutron around the center of the mesh
-    rotated_velocity = rot_apply(geometry->transpose_rotation_matrix,velocity);
-    // rotated_velocity = rot_apply(rotation_matrix_debug,velocity);
-    //     ////printf("Cords rotated_velocity = (%f,%f,%f)\n",rotated_velocity.x,rotated_velocity.y,rotated_velocity.z);
-    
-//printf("Is testing for intersections!\n");
-    int output;
-    double tmpres[2];
-    // Test intersection with bounding sphere // if ((output = sphere_intersect(&t[0],&t[1],x_new,y_new,z_new,v[0],v[1],v[2],radius)) == 0) {
-    //if ((output = sphere_intersect(&tmpres[0],&tmpres[1],x_bb,y_bb,z_bb,rotated_velocity.x,rotated_velocity.y,rotated_velocity.z,Bounding_Box_Radius)) == 0) {
-    if ((output = sphere_intersect(&tmpres[0],&tmpres[1],bounding_box_rotated_coordinates.x,bounding_box_rotated_coordinates.y,bounding_box_rotated_coordinates.z,
-                                   rotated_velocity.x,rotated_velocity.y,rotated_velocity.z,Bounding_Box_Radius)) == 0) {
-        t[0] = -1;
-        t[1] = -1;
-        *num_solutions = 0;
-        return 0;
-    }
-
-    
-    // Check intersections with every single facet:
-    int iter =0;
-    int counter=0;
-    Coords edge1,edge2,h,s,q,tmp,intersect_pos;
-    double UNION_EPSILON = 0.0000001;
-    double this_facet_t;
-    double a,f,u,V;
-    double *t_intersect=malloc(n_facets*sizeof(double));
-    *num_solutions = 0;
-    for (iter = 0 ; iter < n_facets ; iter++){
-    /*////printf("\n\n facet v1 = [%f,%f,%f]",v1_x[iter],v1_y[iter],v1_z[iter]);
-    ////printf("\n facet v2 = [%f,%f,%f]",v2_x[iter],v2_y[iter],v2_z[iter]);
-    ////printf("\n facet v3 = [%f,%f,%f]",v3_x[iter],v3_y[iter],v3_z[iter]);*/
-        // Intersection with face plane (Möller–Trumbore)
-        edge1 = coords_set(*(v2_x+iter)-*(v1_x+iter),*(v2_y+iter)-*(v1_y+iter),*(v2_z+iter)-*(v1_z+iter));
-            ////printf("\n edge 1 = [%f,%f,%f]",edge1.x,edge1.y,edge1.z);
-        edge2 = coords_set(*(v3_x+iter)-*(v1_x+iter),*(v3_y+iter)-*(v1_y+iter),*(v3_z+iter)-*(v1_z+iter));
-        //h = vec_prod(rotated_velocity,edge2);
-        vec_prod(h.x,h.y,h.z,rotated_velocity.x,rotated_velocity.y,rotated_velocity.z,edge2.x,edge2.y,edge2.z);
-        ////printf("\n h = [%f,%f,%f]",h.x,h.y,h.z);
-        ////printf("\n rotated_velocity = [%f,%f,%f]",rotated_velocity.x,rotated_velocity.y,rotated_velocity.z);
-        ////printf("\n edge2 = [%f,%f,%f]",edge2.x,edge2.y,edge2.z);
-        //h = coord_set(rotated_velocity.y*edge2.z-rotated_velocity.z*edge2.y, rotated_velocity.z*edge2.x-rotated_velocity.x*edge2.z, rotated_velocity.x*edge2.y-rotated_velocity.y*edge2.x);
-        //a = Dot(h,edge1);
-        a = Dot(edge1,h);
-        ////printf("\n a=%f",a);
-        //if (a > -UNION_EPSILON && a < UNION_EPSILON){
-            ////printf("\n UNION_EPSILON fail");
-        //} else{
-            f = 1.0/a;
-            s = coords_sub(rotated_coordinates, coords_set(*(v1_x+iter),*(v1_y+iter),*(v1_z+iter)));
-            u = f * (Dot(s,h));
-            if (u < 0.0 || u > 1.0){
-                ////printf("\n Nope 1");
-            }else{
-                //q = vec_prod(s,edge1);
-                vec_prod(q.x,q.y,q.z,s.x,s.y,s.z,edge1.x,edge1.y,edge1.z);
-                V = f * Dot(rotated_velocity,q);
-                if (V < 0.0 || u + V > 1.0){
-                    ////printf("\n Nope 2");
-                } else {
-                    // At this stage we can compute t to find out where the intersection point is on the line.
-                    //tmp = Dot(q,edge2)
-                    ////printf("\nt inside loop = %f",f* Dot(q,edge2));
-                    if (f* Dot(q,edge2) > 0){
-                        
-                        t_intersect[counter] = f* Dot(q,edge2);
-                        //printf("\nIntersects at time: t= %f\n",t_intersect[counter] );
-                        counter++;
-                        
-                        //intersect_pos = coords_set(rotated_coordinates.x+t_intersect[counter]*rotated_velocity.x,rotated_coordinates.y+t_intersect[counter]*rotated_velocity.y,rotated_coordinates.z+t_intersect[counter]*rotated_velocity.z);
-                        //////printf("\n intersects at [%f,%f,%f]",intersect_pos.x,intersect_pos.y,intersect_pos.z);
-                    }
-                    
-                    
-                    
-                }
-            }
-        //}
-    }
-    free(t_intersect);
-    
-    // find two smallest non-zero intersections:
-    /*
-    double t_min = -1.0;
-    double t_second_min= -1.0;
-    for (iter = 0 ; iter < counter; iter++){
-        // test
-        if (t_min == -1 && t_intersect[iter] > 0.0){
-            t_min = t_intersect[iter];
-
-        } else{
-            if (t_intersect[iter] > 0.0 && t_intersect[iter] < t_min) {
-                t_second_min = t_min;
-                t_min = t_intersect[iter];
-     
-            }
-            if (t_intersect[iter] > 0.0 && t_intersect[iter] > t_min) {
-                if (t_intersect[iter] < t_second_min || t_second_min == -1.0){
-                    t_second_min = t_intersect[iter];
-                }
-            }
-        }
-     
-     
-    }
-    
-    //printf("\n number of intersections: %i\n",counter);
-    
-    
-    
-    
-    if (t_second_min > 0) {
-        if (counter % 2 == 0){
-            t[0] = t_second_min;
-            t[1] = t_min;
-            *num_solutions = 2;
-            //printf("\n t[0] = %f   t[1] = %f \n",t_min,t_second_min);
-        } else{
-            t[0] = -1;
-            t[1] = t_min;
-            *num_solutions = 1;
-            //printf("\n t[0] = %f   t[1] = %f \n",t_min,t_second_min);
-        }
-            ////printf("\n t[0] = %f   t[1] = %f \n",t[0],t[1]);
-     
-            //printf("\n num_solutions: %i\n",*num_solutions);
-            return 1;
-    }else if (t_min>0) {
-            t[0] = t_min;
-            t[1] = -1;
-            *num_solutions = 1;
-            //printf("\n num_solutions: %i\n",*num_solutions);
-            return 1;
-    } else {
-            t[0] = -1;
-            t[1] = -1;
-            *num_solutions = 0;
-            //printf("\n num_solutions: %i\n",*num_solutions);
-            return 0;
-    }
-    return 0;
-    */
-
-
-    //for (iter=0;iter<99;iter++){
-    //    printf("\n t[%i] = %f",iter,t[iter]);
-    //    t[iter] = -1;
-    //}
-    
-    // Return all t
-    int counter2=0;
-    *num_solutions =0;
-    for (iter=0; iter < counter ; iter++){
-        if (t_intersect[iter] > 0.0){
-            t[counter2] = t_intersect[iter];
-            counter2++;
-            *num_solutions = counter2;
-        }
-    }
-    // Sort t:
-    
-    if (*num_solutions == 0){
-        return 0;
-    }
-    qsort(t,*num_solutions,sizeof (double), Sample_compare_doubles);
-    if (*num_solutions > 2){
-        //printf("\n T(0) = %f T(1) = %f  T(2) = %f T(3) = %f T(4) = %f",t[0],t[1],t[2],t[3],t[4]);
-        //printf("\n TEST");
-    }
-    return 1;
-    
+struct Moeller_Trumbore{
+  Coords v1;
+  Coords v2;
+  Coords v3;
+  Coords edge1;
+  Coords edge2;
+  Coords h;
+  Coords s;
+  Coords q;
+  Coords rotated_coordinates;
+  Coords rotated_velocity;
+  double a;
+  double f;
+  double V;
+  double u;
 };
 
 
-// #include "MeshFunctions/mesh_intersect.c" // Empty function from Martin?
+double Moeller_Trumbore_intersection(struct Moeller_Trumbore* intersect) {
+  // Function to perform a Moeller Trumbore intersection between a mesh facet
+  // and an arbitrary vector
+  intersect->edge1 = coords_sub(intersect->v2, intersect->v1);
+  intersect->edge2 = coords_sub(intersect->v3, intersect->v1);
+
+  intersect->h = coords_xp(intersect->rotated_velocity, intersect->edge2); 
+  intersect->a = Dot(intersect->edge1, intersect->h);
+
+  intersect->f = 1.0/intersect->a;
+  intersect->s = coords_sub(intersect->rotated_coordinates, intersect->v1);
+  intersect->u = intersect->f * (Dot(intersect->s,intersect->h));
+  if (intersect->u < 0.0 || intersect->u > 1.0){
+    return -1;
+  } else {
+    intersect->q = coords_xp(intersect->s, intersect->edge1);
+    intersect->V = intersect->f * Dot(intersect->rotated_velocity,intersect->q);
+
+    if (intersect->V < 0.0 || intersect->u + intersect->V > 1.0){
+      return -1;
+    } else {
+      // At this stage we can compute t to find out where the intersection point is on the line.    
+      return intersect->f * Dot(intersect->q,intersect->edge2);
+
+    }
+  }
+
+  return 0;
+}
+
+
+int r_within_mesh(Coords pos,struct geometry_struct *geometry) {
+  // r_within_mesh uses a ray casting technique to determine whether or not
+  // a position is within the mesh. 
+  // It chooses a random velocity, and if the number of intersections
+  // is uneven, the position is inside the mesh.
+  // Since this can be numerically unstable, it performs this ray casting 3 times
+  // and then allows the majority of results to decide whether inside or outside
+  // Coordinate transformation
+  Coords coordinates = coords_sub(pos, geometry->center);
+  Coords rotated_coordinates;
+
+  rotated_coordinates = rot_apply(geometry->transpose_rotation_matrix,coordinates);
+  // Check intersections with every single facet:
+  // First do allocations:
+  int n_facets = geometry->geometry_parameters.p_mesh_storage->n_facets;
+  double possible_t;
+  int iter =0;
+  int n_intersections;
+  struct Moeller_Trumbore intersect_transport;
+  double *t_intersect=malloc(n_facets*sizeof(double));
+  int *facet_index = malloc(n_facets*sizeof(int));
+  if (!t_intersect || !facet_index) {
+    fprintf(stderr,"Failure allocating list in Union function sample_mesh_intersect - Exit!\n");
+    exit(EXIT_FAILURE);
+  }
+  Coords *verts = geometry->geometry_parameters.p_mesh_storage->vertices;
+  int **facets = geometry->geometry_parameters.p_mesh_storage->facets;
+  // Then loop over every facet
+  intersect_transport.rotated_coordinates = rotated_coordinates;
+  int inside_vote = 0, outside_vote = 0;
+
+  for (int j = 0; j <3; j++){
+    n_intersections = 0;
+    Coords test_vector = coords_set(rand01(),rand01(),rand01());
+    intersect_transport.rotated_velocity = test_vector;
+    for (iter = 0 ; iter < n_facets ; iter++){
+      intersect_transport.v1 = verts[facets[iter][0]];
+      intersect_transport.v2 = verts[facets[iter][1]];
+      intersect_transport.v3 = verts[facets[iter][2]];
+      possible_t = Moeller_Trumbore_intersection(&intersect_transport);
+      if (possible_t > 0){
+        n_intersections++;
+      }
+    }
+    if (n_intersections%2==1){
+      inside_vote++;
+    } else {
+      outside_vote++;
+    }
+    if (inside_vote == 2 || outside_vote == 2){
+      break;
+    }
+  }
+  if (inside_vote == 2){
+    return 1;
+  } else {
+    return 0;
+  }
+}
+
+
+// Type for holding intersection and normal	
+typedef struct {
+    double t;
+    double nx, ny, nz;
+    int surface_index;
+} Intersection;
+
+// Function to sort intersection structs according to time
+int compare_intersections(const void *a, const void *b) {
+	const Intersection *ia = a;
+	const Intersection *ib = b;
+	if (ia->t < ib->t) return -1;
+	if (ia->t > ib->t) return 1;
+	return 0;
+}
+
+
+int sample_mesh_intersect(double *t,
+                          double *nx, double *ny, double*nz,
+                          int *surface_index,
+                          int *num_solutions,double *r,double *v,
+                          struct geometry_struct *geometry) {
+  // Algorithm for finding the times of intersection with a mesh component.
+  // First, check if the neutron intersects the bounding sphere of the mesh.
+  // Then, if yes, loop over every single facet, and see if the neutron
+  // intersects with it.
+  Coords Bounding_Box_Center = geometry->geometry_parameters.p_mesh_storage->Bounding_Box_Center;
+  double Bounding_Box_Radius = geometry->geometry_parameters.p_mesh_storage->Bounding_Box_Radius;
+  int i;
+
+  double x_new,y_new,z_new;
+  // Coordinate transformation
+  x_new = r[0] - geometry->center.x;
+  y_new = r[1] - geometry->center.y;
+  z_new = r[2] - geometry->center.z;
+  
+  double x_bb,y_bb,z_bb;
+  x_bb = r[0] - Bounding_Box_Center.x - geometry->center.x;
+  y_bb = r[1] - Bounding_Box_Center.y - geometry->center.y;
+  z_bb = r[2] - Bounding_Box_Center.z - geometry->center.z;
+  
+  Coords coordinates = coords_set(x_new,y_new,z_new);
+  Coords rotated_coordinates;
+
+  // Rotate the position of the neutron around the center of the mesh
+  rotated_coordinates = rot_apply(geometry->transpose_rotation_matrix,coordinates);
+  
+  Coords bounding_box_coordinates = coords_set(x_bb, y_bb, z_bb);
+  Coords bounding_box_rotated_coordinates;
+  
+  bounding_box_rotated_coordinates = rot_apply(geometry->transpose_rotation_matrix,bounding_box_coordinates);
+  
+  Coords velocity = coords_set(v[0],v[1],v[2]);
+  Coords rotated_velocity;
+  
+  // Rotate the position of the neutron around the center of the mesh
+  rotated_velocity = rot_apply(geometry->transpose_rotation_matrix,velocity);
+  
+  int output = 0;
+  double tmpres[2];
+  // Test intersection with bounding sphere 
+  if ((output = sphere_intersect(&tmpres[0],&tmpres[1],
+                                 bounding_box_rotated_coordinates.x,
+                                 bounding_box_rotated_coordinates.y,
+                                 bounding_box_rotated_coordinates.z,
+                                 rotated_velocity.x,
+                                 rotated_velocity.y,
+                                 rotated_velocity.z,
+                                 Bounding_Box_Radius)) == 0) {
+    t[0] = -1;
+    t[1] = -1;
+    *num_solutions = 0;
+    return 0;
+  }
+  // Check intersections with every single facet:
+  // First do allocations:
+  int n_facets = geometry->geometry_parameters.p_mesh_storage->n_facets;
+  double possible_t;
+  int iter =0;
+  int counter=0;
+  struct Moeller_Trumbore intersect_transport;
+  // TODO: Allocating T_intersect and facet index might get large with large 
+  // meshes
+  double *t_intersect=malloc(n_facets*sizeof(double));
+  int *facet_index = malloc(n_facets*sizeof(int));
+  if (!t_intersect || !facet_index) {
+    fprintf(stderr,"Failure allocating list in Union function sample_mesh_intersect - Exit!\n");
+    exit(EXIT_FAILURE);
+  }
+  Coords *verts = geometry->geometry_parameters.p_mesh_storage->vertices;
+  int **facets = geometry->geometry_parameters.p_mesh_storage->facets;
+  // Then loop over every facet
+  intersect_transport.rotated_velocity = rotated_velocity;
+  intersect_transport.rotated_coordinates = rotated_coordinates;
+  *num_solutions = 0;
+  for (iter = 0 ; iter < n_facets ; iter++){
+    intersect_transport.v1 = verts[facets[iter][0]];
+    intersect_transport.v2 = verts[facets[iter][1]];
+    intersect_transport.v3 = verts[facets[iter][2]];
+    possible_t = Moeller_Trumbore_intersection(&intersect_transport);
+    if (possible_t != -1){
+      t_intersect[counter] = possible_t;
+      facet_index[counter] = iter;
+      counter++;
+    }
+  }
+	
+	*num_solutions = counter;
+	
+	// Early exit if there are not solutions
+    if (*num_solutions == 0){
+        free(t_intersect);
+        free(facet_index);
+        return 0;
+    }
+	
+	// Move times and normal's into structs to be sorted
+  Intersection *hits = malloc(*num_solutions * sizeof(Intersection));
+  if (!hits) {
+    fprintf(stderr,"Failure allocating Intersection list struct in Union function sample_mesh_intersect - Exit!\n");
+    exit(EXIT_FAILURE);
+  }
+
+	double *normal_x = geometry->geometry_parameters.p_mesh_storage->normal_x;
+  double *normal_y = geometry->geometry_parameters.p_mesh_storage->normal_y;
+  double *normal_z = geometry->geometry_parameters.p_mesh_storage->normal_z;
+  for (iter=0; iter < *num_solutions; iter++){
+	  hits[iter].t  = t_intersect[iter];;
+	  hits[iter].nx = normal_x[facet_index[iter]];
+	  hits[iter].ny = normal_y[facet_index[iter]];
+	  hits[iter].nz = normal_z[facet_index[iter]];				
+	  hits[iter].surface_index = 0;
+  }
+
+  // Sort structs according to time
+  qsort(hits, *num_solutions, sizeof(Intersection), compare_intersections);
+	
+	// Place the solutions into the pointers given in the function parameters for return
+	for (int i = 0; i < *num_solutions; i++) {
+	  t[i]  = hits[i].t;
+	  nx[i] = hits[i].nx;
+	  ny[i] = hits[i].ny;
+	  nz[i] = hits[i].nz;
+	  surface_index[i] = hits[i].surface_index;
+	}
+	
+  free(facet_index);
+  free(t_intersect);
+	free(hits);
+  return 1;
+};
+
 
 int r_within_box_advanced(Coords pos,struct geometry_struct *geometry) {
     // Unpack parameters
@@ -3503,7 +3897,6 @@ int r_within_box_advanced(Coords pos,struct geometry_struct *geometry) {
     Coords coordinates = coords_sub(pos,geometry->center);
     
     Coords rotated_coordinates;
-    // printf("Cords coordinates = (%f,%f,%f)\n",coordinates.x,coordinates.y,coordinates.z);
     
     // Rotate the position of the neutron around the center of the cylinder
     rotated_coordinates = rot_apply(geometry->transpose_rotation_matrix,coordinates);
@@ -3548,7 +3941,13 @@ int existence_of_intersection(Coords point1, Coords point2, struct geometry_stru
 
     start_point[0] = point1.x;start_point[1] = point1.y;start_point[2] = point1.z;
     vector_between_v[0] = vector_between.x;vector_between_v[1] = vector_between.y;vector_between_v[2] = vector_between.z;
-    geometry->intersect_function(temp_solution,&number_of_solutions,start_point,vector_between_v,geometry);
+	
+	// todo: Switch to nicer intersect call
+	double dummy_double[2];
+	int dummy_int[2];
+	
+    //printf("\nChecking the existence of intersections");	
+    geometry->intersect_function(temp_solution, dummy_double, dummy_double, dummy_double, dummy_int, &number_of_solutions, start_point, vector_between_v, geometry);
     if (number_of_solutions > 0) {
         if (temp_solution[0] > 0 && temp_solution[0] < 1) return 1;
         if (number_of_solutions == 2) {
@@ -3618,7 +4017,7 @@ int box_overlaps_box(struct geometry_struct *geometry1,struct geometry_struct *g
 
 // -------------    Functions for sphere ray tracing used in trace ------------------------------
 // These functions needs to be fast, as they may be used many times for each ray
-int sample_sphere_intersect(double *t,int *num_solutions,double *r,double *v,struct geometry_struct *geometry) {
+int sample_sphere_intersect(double *t, double *nx, double *ny, double *nz, int *surface_index, int *num_solutions,double *r,double *v,struct geometry_struct *geometry) {
     double radius = geometry->geometry_parameters.p_sphere_storage->sph_radius;
     
     // Declare variables for the function
@@ -3629,12 +4028,47 @@ int sample_sphere_intersect(double *t,int *num_solutions,double *r,double *v,str
     y_new = r[1] - geometry->center.y;
     z_new = r[2] - geometry->center.z;
     
-    int output;
+    int output = 0;
     // Run McStas built in sphere intersect funtion (sphere centered around origin)
     if ((output = sphere_intersect(&t[0],&t[1],x_new,y_new,z_new,v[0],v[1],v[2],radius)) == 0) {
         *num_solutions = 0;t[0]=-1;t[1]=-1;}
     else if (t[1] != 0) *num_solutions = 2;
     else {*num_solutions = 1;t[1]=-1;}
+	
+	// Calculate normals
+	int iterator;
+	double x_intersect, y_intersect, z_intersect; // relative to sphere center
+	Coords coordinates;
+	Coords rotated_coordinates;	
+	
+	for (iterator=0;iterator<*num_solutions;iterator++) {
+		x_intersect = t[iterator]*v[0] + x_new;
+		y_intersect = t[iterator]*v[1] + y_new;
+		z_intersect = t[iterator]*v[2] + z_new;
+		
+	    coordinates = coords_set(x_intersect,y_intersect,z_intersect);
+		NORM(coordinates.x, coordinates.y, coordinates.z);
+		nx[iterator] = coordinates.x;
+		ny[iterator] = coordinates.y;
+		nz[iterator] = coordinates.z;				
+		surface_index[iterator] = 0;
+		
+		/*
+		// Since the ray was never rotated into the sphere coordinate system (due to symmetry)
+		//  rotating back is not necessary
+			
+	    // printf("Cords coordinates = (%f,%f,%f)\n",coordinates.x,coordinates.y,coordinates.z);
+    
+	    // debug
+	    // Rotation rotation_matrix_debug[3][3];
+	    // rot_set_rotation(rotation_matrix_debug,-1.0*geometry->rotation.x,-1.0*geometry->rotation.y,-1.0*geometry->rotation.z);
+	    // rot_transpose(geometry->rotation_matrix,rotation_matrix_debug);
+
+	    // Rotate the position of the neutron around the center of the cylinder
+	    rotated_coordinates = rot_apply(geometry->transpose_rotation_matrix,coordinates);
+		*/
+			
+	}
     
     return output;
 };
@@ -3685,11 +4119,11 @@ int sphere_within_sphere(struct geometry_struct *geometry_child,struct geometry_
 
 // -------------    Functions for cylinder ray tracing used in trace ------------------------------
 // These functions needs to be fast, as they may be used many times for each ray
-int sample_cylinder_intersect(double *t,int *num_solutions,double *r,double *v,struct geometry_struct *geometry) {
+int sample_cylinder_intersect(double *t, double *nx, double *ny, double *nz, int *surface_index, int *num_solutions,double *r,double *v,struct geometry_struct *geometry) {
     double radius = geometry->geometry_parameters.p_cylinder_storage->cyl_radius;
     double height = geometry->geometry_parameters.p_cylinder_storage->height;
     
-    // Declare variables for the function
+    // Declare position variables for the local coordinate system
     double x_new,y_new,z_new;
     
     // Coordinate transformation
@@ -3699,55 +4133,116 @@ int sample_cylinder_intersect(double *t,int *num_solutions,double *r,double *v,s
     
     Coords coordinates = coords_set(x_new,y_new,z_new);
     Coords rotated_coordinates;
-    // printf("Cords coordinates = (%f,%f,%f)\n",coordinates.x,coordinates.y,coordinates.z);
-    
-    // debug
-    // Rotation rotation_matrix_debug[3][3];
-    // rot_set_rotation(rotation_matrix_debug,-1.0*geometry->rotation.x,-1.0*geometry->rotation.y,-1.0*geometry->rotation.z);
-    // rot_transpose(geometry->rotation_matrix,rotation_matrix_debug);
 
     // Rotate the position of the neutron around the center of the cylinder
     rotated_coordinates = rot_apply(geometry->transpose_rotation_matrix,coordinates);
-    // rotated_coordinates = rot_apply(rotation_matrix_debug,coordinates);
-    //     printf("Cords rotated_coordinates = (%f,%f,%f)\n",rotated_coordinates.x,rotated_coordinates.y,rotated_coordinates.z);
     
     Coords velocity = coords_set(v[0],v[1],v[2]);
     Coords rotated_velocity;
-    //     printf("Cords velocity = (%f,%f,%f)\n",velocity.x,velocity.y,velocity.z);
     
     // Rotate the position of the neutron around the center of the cylinder
     rotated_velocity = rot_apply(geometry->transpose_rotation_matrix,velocity);
-    // rotated_velocity = rot_apply(rotation_matrix_debug,velocity);
-    //     printf("Cords rotated_velocity = (%f,%f,%f)\n",rotated_velocity.x,rotated_velocity.y,rotated_velocity.z);
     
+	int output = 0;    
+	// Cases where the velocity is parallel with the cylinder axis have given problems, and is checked for explicitly
+	if (sqrt(rotated_velocity.x*rotated_velocity.x+rotated_velocity.z*rotated_velocity.z)/fabs(rotated_velocity.y) < 0.00001) {
+	  // The velocity is parallel with the cylinder axis. Either there are no solutions or two solutions
+	  if (sqrt(rotated_coordinates.x*rotated_coordinates.x+rotated_coordinates.z*rotated_coordinates.z) > radius) {
+	    *num_solutions = 0;
+	    return 0;
+	  } else {
+	    *num_solutions = 2;
+	    t[0] = (0.5*height - rotated_coordinates.y)/rotated_velocity.y;
+		surface_index[0] = 1; // index indicating top
+		
+	    t[1] = (-0.5*height - rotated_coordinates.y)/rotated_velocity.y;
+		surface_index[1] = 2; // index indicating bottom
+		
+		// sort solutions
+		if (t[0] > t[1]) {
+		  double d_temp;
+		  
+		  d_temp = t[0];
+		  t[0] = t[1];
+		  t[1] = d_temp;
+		  
+		  int i_temp;
+		  
+		  i_temp = surface_index[0];
+		  surface_index[0] = surface_index[1];
+		  surface_index[1] = i_temp;
+		}
+	  }
+	} else {
+	  // velocity not parallel to cylinder axis, call standard mcstas cylinder intersect 
+
+	  // Run McStas built in sphere intersect funtion (sphere centered around origin)
+	  if ((output = cylinder_intersect(&t[0],&t[1],
+	                                   rotated_coordinates.x,rotated_coordinates.y,rotated_coordinates.z,
+	                                   rotated_velocity.x,rotated_velocity.y,rotated_velocity.z,radius,height)) == 0) {
+	      *num_solutions = 0;t[0]=-1;t[1]=-1;
+	  }
+	  else if (t[1] != 0) *num_solutions = 2;
+	  else {*num_solutions = 1; t[1]=-1;}
+	
+	  // decode output value
+	  // Check the bitmask for entry and exit
+	  if (*num_solutions > 0) {
+	    int entry_index = 0;
+	    if (output & 2) entry_index = 1; // Entry intersects top cap
+	    if (output & 4) entry_index = 2; // Entry intersects bottom cap
+	    surface_index[0] = entry_index;
+	  }
+	
+	  if (*num_solutions > 1) {
+	    int exit_index = 0;		
+	    if (output & 8) exit_index = 1;  // Exit intersects top cap
+	    if (output & 16) exit_index = 2; // Exit intersects bottom cap
+	    surface_index[1] = exit_index;
+	  }
+	}
     
-    
-    // Cases where the velocity is parallel with the cylinder axis have given problems, and is checked for explicitly
-    if (sqrt(rotated_velocity.x*rotated_velocity.x+rotated_velocity.z*rotated_velocity.z)/fabs(rotated_velocity.y) < 0.00001) {
-      // The velocity is parallel with the cylinder axis. Either there is two solutions
-      if (sqrt(rotated_coordinates.x*rotated_coordinates.x+rotated_coordinates.z*rotated_coordinates.z) > radius) {
-        *num_solutions = 0;
-        return 0;
-      } else {
-        *num_solutions = 2;
-        t[0] = (0.5*height - rotated_coordinates.y)/rotated_velocity.y;
-        t[1] = (-0.5*height - rotated_coordinates.y)/rotated_velocity.y;
-        return 1;
-      }
+	
+	// Calculate normal vectors from surface index and cylinder geometry
+    int index;
+    double x, y, z, dt;
+    Coords normal_vector_rotated;
+    Coords normal_vector;
+	
+    for (index=0; index<*num_solutions; index++) {
+		
+		// top and bottom easy
+		if (surface_index[index] == 1) {
+			normal_vector_rotated = coords_set(0,1,0);
+			
+		} else if (surface_index[index] == 2) {
+			normal_vector_rotated = coords_set(0,-1,0);			
+		} else {
+	        dt = t[index];
+        
+	        // Intersection point in cylinder coordinate system
+	        x = rotated_coordinates.x + dt*rotated_velocity.x;
+	        y = rotated_coordinates.y + dt*rotated_velocity.y;
+	        z = rotated_coordinates.z + dt*rotated_velocity.z;
+			
+			normal_vector_rotated = coords_set(x,0,z);			
+			NORM(normal_vector_rotated.x, normal_vector_rotated.y, normal_vector_rotated.z);
+		}
+		
+        // Rotate back to master coordinate system
+        normal_vector = rot_apply(geometry->rotation_matrix, normal_vector_rotated);
+		
+        // Set the normal vector components
+        nx[index] = normal_vector.x;
+        ny[index] = normal_vector.y;
+        nz[index] = normal_vector.z;
     }
-    
-    int output;
-    // Run McStas built in sphere intersect funtion (sphere centered around origin)
-    if ((output = cylinder_intersect(&t[0],&t[1],rotated_coordinates.x,rotated_coordinates.y,rotated_coordinates.z,rotated_velocity.x,rotated_velocity.y,rotated_velocity.z,radius,height)) == 0) {
-        *num_solutions = 0;t[0]=-1;t[1]=-1;}
-    else if (t[1] != 0) *num_solutions = 2;
-    else {*num_solutions = 1;t[1]=-1;}
     
     return output;
 };
 
 int r_within_cylinder(Coords pos,struct geometry_struct *geometry) {
-// Unpack parameters
+    // Unpack parameters
     double radius = geometry->geometry_parameters.p_cylinder_storage->cyl_radius;
     double height = geometry->geometry_parameters.p_cylinder_storage->height;
 
@@ -3757,7 +4252,7 @@ int r_within_cylinder(Coords pos,struct geometry_struct *geometry) {
     
     // Start with vector that points along the cylinder in the simple frame, and rotate to global
     Coords simple_vector = coords_set(0,1,0);
-    Coords vector1,vector2;
+    Coords vector1;
     if (verbal == 1) printf("Cords start_vector = (%f,%f,%f)\n",simple_vector.x,simple_vector.y,simple_vector.z);
 
     // Rotate the position of the neutron around the center of the cylinder
@@ -3776,7 +4271,7 @@ int r_within_cylinder(Coords pos,struct geometry_struct *geometry) {
     // Test for separation by height
     // if (h0Div2 + h1Div2 − |Dot(W0, Delta )| < 0) seperated = 1;
     
-    if (verbal == 1) printf("vector1 = (%f,%f,%f)\n",vector1.x,vector1.y,vector2.z);
+    if (verbal == 1) printf("vector1 = (%f,%f,%f)\n",vector1.x,vector1.y,vector1.z);
     if (verbal == 1) printf("delta1 = (%f,%f,%f)\n",delta.x,delta.y,delta.z);
     double scalar_prod1 = scalar_prod(vector1.x,vector1.y,vector1.z,delta.x,delta.y,delta.z);
     if (verbal == 1) printf("scalar product = %f \n",scalar_prod1);
@@ -3946,8 +4441,10 @@ int cylinder_overlaps_cylinder(struct geometry_struct *geometry1,struct geometry
                 radial_position[0] = base_point.x + circ_point.x;
                 radial_position[1] = base_point.y + circ_point.y;
                 radial_position[2] = base_point.z + circ_point.z;
-                // sample_cylinder_intersect(double *t,int *num_solutions,double *r,double *v,struct geometry_struct *geometry) {
-                sample_cylinder_intersect(temp_solution,&number_of_solutions,radial_position,cyl_direction_pointer,geometry2);
+                double nx_dummy[2], ny_dummy[2], nz_dummy[2];
+                int surface_index_dummy[2];
+                sample_cylinder_intersect(temp_solution, nx_dummy, ny_dummy, nz_dummy, surface_index_dummy,
+				                          &number_of_solutions,radial_position,cyl_direction_pointer,geometry2);
                 for (solutions = 0;solutions < number_of_solutions;solutions++) {
                     if (temp_solution[solutions] > 0 && temp_solution[solutions] < height1) {
                         // cylinders must overlap.
@@ -3969,7 +4466,8 @@ int cylinder_overlaps_cylinder(struct geometry_struct *geometry1,struct geometry
                 base_point_vector[2] = base_point.z;
             
                 // The vector circ_point is from the base to the circumference. This is used to check the bottom cap.
-                sample_cylinder_intersect(temp_solution,&number_of_solutions,base_point_vector,cyl_radial_direction,geometry2);
+                sample_cylinder_intersect(temp_solution,nx_dummy, ny_dummy, nz_dummy, surface_index_dummy, 
+				                          &number_of_solutions,base_point_vector,cyl_radial_direction,geometry2);
                 for (solutions = 0;solutions < number_of_solutions;solutions++) {
                     if (temp_solution[solutions] > 0 && temp_solution[solutions] < 1) {
                         // cylinders must overlap.
@@ -3987,7 +4485,8 @@ int cylinder_overlaps_cylinder(struct geometry_struct *geometry1,struct geometry
                 base_point_vector[2] = base_point.z + height1*cyl_direction1.z;
             
                 // The vector circ_point is from the base to the circumference. This is used to check the bottom cap.
-                sample_cylinder_intersect(temp_solution,&number_of_solutions,base_point_vector,cyl_radial_direction,geometry2);
+                sample_cylinder_intersect(temp_solution, nx_dummy, ny_dummy, nz_dummy, surface_index_dummy,
+				                          &number_of_solutions,base_point_vector,cyl_radial_direction,geometry2);
                 for (solutions = 0;solutions < number_of_solutions;solutions++) {
                     if (temp_solution[solutions] > 0 && temp_solution[solutions] < 1) {
                         // cylinders must overlap.
@@ -4175,7 +4674,10 @@ int cylinder_within_cylinder(struct geometry_struct *geometry_child,struct geome
                 }
             
                 // sample_cylinder_intersect(double *t,int *num_solutions,double *r,double *v,struct geometry_struct *geometry) {
-                sample_cylinder_intersect(temp_solution,&number_of_solutions,radial_position,cyl_direction_pointer,geometry_parent);
+				double nx_dummy[2], ny_dummy[2], nz_dummy[2];
+				int surface_index_dummy[2];
+                sample_cylinder_intersect(temp_solution, nx_dummy, ny_dummy, nz_dummy, surface_index_dummy, 
+				                          &number_of_solutions,radial_position,cyl_direction_pointer,geometry_parent);
             
                 if (number_of_solutions == 2) {
                     if (temp_solution[0]*temp_solution[1] > 0) {
@@ -4220,7 +4722,8 @@ int cylinder_within_cylinder(struct geometry_struct *geometry_child,struct geome
                 base_point_vector[2] = base_point.z;
             
                 // The vector circ_point is from the base to the circumference. This is used to check the bottom cap.
-                sample_cylinder_intersect(temp_solution,&number_of_solutions,base_point_vector,cyl_radial_direction,geometry_parent);
+                sample_cylinder_intersect(temp_solution, nx_dummy, ny_dummy, nz_dummy, surface_index_dummy,
+				                          &number_of_solutions,base_point_vector,cyl_radial_direction,geometry_parent);
                 
                 if (number_of_solutions == 2) {
                     if (temp_solution[0]*temp_solution[1] > 0) {
@@ -4262,7 +4765,8 @@ int cylinder_within_cylinder(struct geometry_struct *geometry_child,struct geome
                 }
             
                 // The vector circ_point is from the base to the circumference. This is used to check the bottom cap.
-                sample_cylinder_intersect(temp_solution,&number_of_solutions,base_point_vector,cyl_radial_direction,geometry_parent);
+                sample_cylinder_intersect(temp_solution, nx_dummy, ny_dummy, nz_dummy, surface_index_dummy,
+				                          &number_of_solutions,base_point_vector,cyl_radial_direction,geometry_parent);
                 if (number_of_solutions == 2) {
                     if (temp_solution[0]*temp_solution[1] > 0) {
                         // If both solutions are in the future or past, the point is outside the cylinder
@@ -4447,7 +4951,10 @@ int cylinder_within_cylinder_backup(struct geometry_struct *geometry_child,struc
                 radial_position[1] = base_point.y + circ_point.y;
                 radial_position[2] = base_point.z + circ_point.z;
                 // sample_cylinder_intersect(double *t,int *num_solutions,double *r,double *v,struct geometry_struct *geometry) {
-                sample_cylinder_intersect(temp_solution,&number_of_solutions,radial_position,cyl_direction_pointer,geometry_child);
+				double nx_dummy[2], ny_dummy[2], nz_dummy[2];
+				int surface_index_dummy[2];
+                sample_cylinder_intersect(temp_solution, nx_dummy, ny_dummy, nz_dummy, surface_index_dummy,
+				                          &number_of_solutions,radial_position,cyl_direction_pointer,geometry_child);
                 for (solutions = 0;solutions < number_of_solutions;solutions++) {
                     if (temp_solution[solutions] > 0 && temp_solution[solutions] < height1) {
                         // cylinders must overlap.
@@ -4469,7 +4976,8 @@ int cylinder_within_cylinder_backup(struct geometry_struct *geometry_child,struc
                 base_point_vector[2] = base_point.z;
             
                 // The vector circ_point is from the base to the circumference. This is used to check the bottom cap.
-                sample_cylinder_intersect(temp_solution,&number_of_solutions,base_point_vector,cyl_radial_direction,geometry_child);
+                sample_cylinder_intersect(temp_solution, nx_dummy, ny_dummy, nz_dummy, surface_index_dummy,
+				                          &number_of_solutions,base_point_vector,cyl_radial_direction,geometry_child);
                 for (solutions = 0;solutions < number_of_solutions;solutions++) {
                     if (temp_solution[solutions] > 0 && temp_solution[solutions] < 1) {
                         // cylinders must overlap.
@@ -4487,7 +4995,8 @@ int cylinder_within_cylinder_backup(struct geometry_struct *geometry_child,struc
                 base_point_vector[2] = base_point.z + height1*cyl_direction1.z;
             
                 // The vector circ_point is from the base to the circumference. This is used to check the bottom cap.
-                sample_cylinder_intersect(temp_solution,&number_of_solutions,base_point_vector,cyl_radial_direction,geometry_child);
+                sample_cylinder_intersect(temp_solution, nx_dummy, ny_dummy, nz_dummy, surface_index_dummy,
+				                          &number_of_solutions,base_point_vector,cyl_radial_direction,geometry_child);
                 for (solutions = 0;solutions < number_of_solutions;solutions++) {
                     if (temp_solution[solutions] > 0 && temp_solution[solutions] < 1) {
                         // cylinders must overlap.
@@ -4598,10 +5107,6 @@ int cone_overlaps_cone(struct geometry_struct *geometry1,struct geometry_struct 
 
     struct pointer_to_1d_coords_list cone_1_points = geometry1->shell_points(geometry1,resoultuion);
 
-    //points_on_circle(cone_1_top,cone_1_top_point,direction_1,radius_top_1,resoultuion);
-    //points_on_circle(cone_1_bottom,cone_1_bottom_point,direction_1,radius_bottom_1,resoultuion);
-
-    //printf("\nTEST\n");
     int i;
     // Test geometry 1 points inside geometry 2
 
@@ -4664,7 +5169,6 @@ int cone_overlaps_cone(struct geometry_struct *geometry1,struct geometry_struct 
         local_radius = circ_offset * slope_1 + radius_bottom_1;
 
         // Make points on circle
-        //printf("points on circle: circ_center = [%f,%f,%f] , cone_1_direction = [%f,%f,%f] , local_radius = %f , circ_resolution = %i",circ_center.x,circ_center.y,circ_center.z,cone_1_direction.x,cone_1_direction.y,cone_1_direction.z,local_radius,circ_resolution);
         points_on_circle(circ_points,circ_center,cone_1_direction,local_radius,circ_resolution);
 
         // Test if any points lies within geomtry 2
@@ -4714,43 +5218,136 @@ int cone_within_cone(struct geometry_struct *geometry_child,struct geometry_stru
 };
 
 int mesh_overlaps_mesh(struct geometry_struct *geometry1,struct geometry_struct *geometry2) {
-  // Overlap function should return 1 if the to geometries both cover some volume
-  // Temporary function
-
+    // Overlap function should return 1 if the to geometries both cover some volume
+    // TODO: Add fast check to see if point is within largest contained sphere
+    // Or outside of bounding box.
+    
     // Brute force check if there is one point of geometry 1 in 2 and 2 in 1.
-
-    // Should also have a secondary check with edges intersecting on faces.
-    // Could be made faster with a bounding box (or sphere)
-
-
-    // Load Variables:
+    // Note! shell points for meshes dont generate a varying number of points:
     struct pointer_to_1d_coords_list shell_points1 = geometry1->shell_points(geometry1,144);
     struct pointer_to_1d_coords_list shell_points2 = geometry2->shell_points(geometry2,144);
 
     int i;
     for (i = 0 ; i < shell_points1.num_elements ; i++){
-        if (r_within_mesh(shell_points1.elements[i],geometry2)){
-            free(shell_points1.elements);
-            free(shell_points2.elements);
-            return 1;
-        }
+      if (geometry2->within_function(shell_points1.elements[i],geometry2)){
+        free(shell_points1.elements);
+        free(shell_points2.elements);
+        return 1;
+      }
     }
     for (i = 0 ; i < shell_points2.num_elements ; i++){
-        if (r_within_mesh(shell_points2.elements[i],geometry1)){
-            free(shell_points1.elements);
-            free(shell_points2.elements);
-            return 1;
-        }
+      if (geometry1->within_function(shell_points2.elements[i],geometry1)){
+        free(shell_points1.elements);
+        free(shell_points2.elements);
+        return 1;
+      }
     }
-    
+    // Secondary check with edges intersecting on faces
+    if (geometry1->eShape==mesh){
+      int **facets = geometry1->geometry_parameters.p_mesh_storage->facets;
+      Coords *verts = geometry1->geometry_parameters.p_mesh_storage->vertices;
+      Coords vert1, vert2, vert3;
+      for (i = 0; i < geometry1->geometry_parameters.p_mesh_storage->n_facets; i++){
+        vert1 = shell_points1.elements[facets[i][0]];
+        vert2 = shell_points1.elements[facets[i][1]];
+        vert3 = shell_points1.elements[facets[i][2]];
+        if (existence_of_intersection(vert1, vert2, geometry2) == 1) {
+          free(shell_points1.elements);
+          free(shell_points2.elements);
+          return 1;
+        } 
+        if (existence_of_intersection(vert1, vert3, geometry2) == 1) {
+          free(shell_points1.elements);
+          free(shell_points2.elements);
+          return 1;
+        }
+        if (existence_of_intersection(vert2, vert3, geometry2) == 1) {
+          free(shell_points1.elements);
+          free(shell_points2.elements);
+          return 1;
+        }
+      }
+    }
+    if (geometry2->eShape==mesh){
+      int **facets = geometry2->geometry_parameters.p_mesh_storage->facets;
+      Coords *verts = geometry2->geometry_parameters.p_mesh_storage->vertices;
+      Coords vert1, vert2, vert3;
+      for (i = 0; i < geometry2->geometry_parameters.p_mesh_storage->n_facets; i++){
+        vert1 = shell_points2.elements[facets[i][0]];
+        vert2 = shell_points2.elements[facets[i][1]];
+        vert3 = shell_points2.elements[facets[i][2]];
+        if (existence_of_intersection(vert1, vert2, geometry1) == 1) {
+          free(shell_points1.elements);
+          free(shell_points2.elements);
+          return 1;
+        } 
+        if (existence_of_intersection(vert1, vert3, geometry1) == 1) {
+          free(shell_points1.elements);
+          free(shell_points2.elements);
+          return 1;
+        }
+        if (existence_of_intersection(vert2, vert3, geometry1) == 1) {
+          free(shell_points1.elements);
+          free(shell_points2.elements);
+          return 1;
+        }
+      }
+    }
     free(shell_points1.elements);
     free(shell_points2.elements);
-
     return 0;
 
 };
+int mesh_within_box(struct geometry_struct *geometry_child,struct geometry_struct *geometry_parent) {
+    // Function returns 1 if the cone is completely within the cylinder, 0 otherwise
+    // Brute force place holder
+    return mesh_A_within_B(geometry_child,geometry_parent); // 30 points on each end cap
+};
+
+int box_within_mesh(struct geometry_struct *geometry_child,struct geometry_struct *geometry_parent) {
+    // Function returns 1 if the cone is completely within the cylinder, 0 otherwise
+    // Brute force place holder
+    return mesh_A_within_B(geometry_child,geometry_parent); // 30 points on each end cap
+};
+
+int mesh_within_sphere(struct geometry_struct *geometry_child,struct geometry_struct *geometry_parent) {
+    // Function returns 1 if the cone is completely within the cylinder, 0 otherwise
+    // Brute force place holder
+    return mesh_A_within_B(geometry_child,geometry_parent); // 30 points on each end cap
+};
+int sphere_within_mesh(struct geometry_struct *geometry_child,struct geometry_struct *geometry_parent) {
+    // Function returns 1 if the cone is completely within the cylinder, 0 otherwise
+    // Brute force place holder
+    return mesh_A_within_B(geometry_child,geometry_parent); // 30 points on each end cap
+};
+int cone_within_mesh(struct geometry_struct *geometry_child,struct geometry_struct *geometry_parent) {
+    // Function returns 1 if the cone is completely within the cylinder, 0 otherwise
+    // Brute force place holder
+    return mesh_A_within_B(geometry_child,geometry_parent); // 30 points on each end cap
+};
+
+
+int mesh_within_cone(struct geometry_struct *geometry_child,struct geometry_struct *geometry_parent) {
+    // Function returns 1 if the cone is completely within the cylinder, 0 otherwise
+    // Brute force place holder
+    return mesh_A_within_B(geometry_child,geometry_parent); // 30 points on each end cap
+};
+
+int mesh_within_cylinder(struct geometry_struct *geometry_child,struct geometry_struct *geometry_parent) {
+    // Function returns 1 if the cone is completely within the cylinder, 0 otherwise
+    // Brute force place holder
+    return mesh_A_within_B(geometry_child,geometry_parent); // 30 points on each end cap
+};
+
+
+int cylinder_within_mesh(struct geometry_struct *geometry_child,struct geometry_struct *geometry_parent) {
+    // Function returns 1 if the cone is completely within the cylinder, 0 otherwise
+    // Brute force place holder
+    return mesh_A_within_B(geometry_child,geometry_parent); // 30 points on each end cap
+};
 
 int mesh_within_mesh(struct geometry_struct *geometry_child,struct geometry_struct *geometry_parent) {
+    // WARNING: This may fail as one or both of the meshes may not be convex
     // Function returns 1 if the cone is completely within the cylinder, 0 otherwise
     // Brute force place holder
     return mesh_A_within_B(geometry_child,geometry_parent); // 30 points on each end cap
@@ -4793,7 +5390,10 @@ int box_overlaps_cylinder(struct geometry_struct *geometry_box,struct geometry_s
     Coords *circle_point_array;
     int number_of_points = 150;
     circle_point_array = malloc(number_of_points * sizeof(Coords));
-    
+    if (!circle_point_array) {
+      fprintf(stderr,"Failure allocating list in Union function box_overlaps_cylinder - Exit!\n");
+      exit(EXIT_FAILURE);
+    }
     points_on_circle(circle_point_array,cyl_top_point,cyl_direction,radius,number_of_points);
     
     // Check parts of cylinder top seperatly
@@ -5081,7 +5681,7 @@ int cone_overlaps_sphere(struct geometry_struct *geometry_cone,struct geometry_s
     
       if (shell_points.num_elements > resolution || shell_points.num_elements < 0) {
         printf("\nERROR: Shell point function used in A_within_B return garbage num_elements. \n");
-        exit(1);
+        exit(EXIT_FAILURE);
       }
     
       int iterate;
@@ -5104,7 +5704,7 @@ int cone_overlaps_sphere(struct geometry_struct *geometry_cone,struct geometry_s
     
       if (shell_points.num_elements > resolution || shell_points.num_elements < 0) {
         printf("\nERROR: Shell point function used in A_within_B return garbage num_elements. \n");
-        exit(1);
+        exit(EXIT_FAILURE);
       }
     
 
@@ -5173,7 +5773,7 @@ int cone_overlaps_cylinder(struct geometry_struct *geometry_cone,struct geometry
 
 
     if (dist_spheres > sphere_1_radius + sphere_2_radius){
-        printf("\nSpherical method determined that cones are too far away for intersection to be relevant\n");
+        //printf("\nSpherical method determined that cones are too far away for intersection to be relevant\n");
         return 0;
     }
 
@@ -5460,7 +6060,8 @@ int cone_overlaps_box(struct geometry_struct *geometry_cone,struct geometry_stru
 
     Coords square_points[8];
     double square_offset;
-    Coords square_center;
+    // PW FIXME: square_center needs init - probably no to 0, but certainly not to "random stuff on memory"
+    Coords square_center=coords_set(0,0,0);
     Coords box_end_point = coords_sub(coords_set(0,0,-z_depth/2),square_center);
 
     int j;
@@ -5531,6 +6132,30 @@ int box_overlaps_cone(struct geometry_struct *geometry_box,struct geometry_struc
   return cone_overlaps_box(geometry_cone,geometry_box);
 }
 
+int mesh_overlaps_box(struct geometry_struct *geometry1, struct geometry_struct *geometry2){
+   return mesh_overlaps_mesh(geometry1, geometry2);
+}
+int mesh_overlaps_cone(struct geometry_struct *geometry1, struct geometry_struct *geometry2){
+   return mesh_overlaps_mesh(geometry1, geometry2);
+}
+int mesh_overlaps_sphere(struct geometry_struct *geometry1,struct geometry_struct *geometry2) {
+   return mesh_overlaps_mesh(geometry1, geometry2);
+};
+int mesh_overlaps_cylinder(struct geometry_struct *geometry1,struct geometry_struct *geometry2) {
+   return mesh_overlaps_mesh(geometry1, geometry2);
+};
+int box_overlaps_mesh(struct geometry_struct *geometry1, struct geometry_struct *geometry2){
+   return mesh_overlaps_mesh(geometry1, geometry2);
+}
+int cone_overlaps_mesh(struct geometry_struct *geometry1, struct geometry_struct *geometry2){
+   return mesh_overlaps_mesh(geometry1, geometry2);
+}
+int sphere_overlaps_mesh(struct geometry_struct *geometry1,struct geometry_struct *geometry2) {
+   return mesh_overlaps_mesh(geometry1, geometry2);
+};
+int cylinder_overlaps_mesh(struct geometry_struct *geometry1,struct geometry_struct *geometry2) {
+   return mesh_overlaps_mesh(geometry1, geometry2);
+};
 // -------------    Within functions for two different geometries ---------------------------------
 
 double dist_from_point_to_plane(Coords point,Coords plane_p1, Coords plane_p2, Coords plane_p3) {
@@ -5599,7 +6224,10 @@ int cylinder_within_box(struct geometry_struct *geometry_child,struct geometry_s
     Coords *circle_point_array;
     int number_of_points = 30;
     circle_point_array = malloc(number_of_points * sizeof(Coords));
-    
+    if (!circle_point_array) {
+      fprintf(stderr,"Failure allocating list in Union function cylinder_within_box - Exit!\n");
+      exit(EXIT_FAILURE);
+    }
     points_on_circle(circle_point_array,cyl_top_point,cyl_direction,radius,number_of_points);
     
     // Check parts of cylinder top seperatly
@@ -5867,34 +6495,35 @@ int box_within_cone(struct geometry_struct *geometry_child,struct geometry_struc
 
 
 // Flexible intersection function
-int intersect_function(double *t,int *num_solutions,double *r,double *v,struct geometry_struct *geometry) {
+int intersect_function(double *t, double *nx, double *ny, double *nz, int *surface_index, int *num_solutions, double *r, double *v, struct geometry_struct *geometry) {
     int output = 0;
     switch(geometry->eShape) {
         case box:
-            if (geometry->geometry_parameters.p_box_storage->is_rectangle == 1)
-                output = sample_box_intersect_simple(t, num_solutions, r, v, geometry);
-            else
-                output = sample_box_intersect_advanced(t, num_solutions, r, v, geometry);
+            if (geometry->geometry_parameters.p_box_storage->is_rectangle == 1) {
+                output = sample_box_intersect_simple(t, nx, ny, nz, surface_index, num_solutions, r, v, geometry);
+			} else {
+                output = sample_box_intersect_advanced(t, nx, ny, nz, surface_index, num_solutions, r, v, geometry);
+			}
             break;
         case sphere:
-            output = sample_sphere_intersect(t, num_solutions, r, v, geometry);
+            output = sample_sphere_intersect(t, nx, ny, nz, surface_index, num_solutions, r, v, geometry);
             break;
         case cylinder:
-            output = sample_cylinder_intersect(t, num_solutions, r, v, geometry);
+            output = sample_cylinder_intersect(t, nx, ny, nz, surface_index, num_solutions, r, v, geometry);
             break;
         case cone:
-            output = sample_cone_intersect(t, num_solutions, r, v, geometry);
+            output = sample_cone_intersect(t, nx, ny, nz, surface_index, num_solutions, r, v, geometry);
             break;
         #ifndef OPENACC
         case mesh:
-            output = sample_mesh_intersect(t, num_solutions, r, v, geometry);
+            output = sample_mesh_intersect(t, nx, ny, nz, surface_index, num_solutions, r, v, geometry);
             break;
         #endif
         default:
             printf("Intersection function: No matching geometry found!");
             break;
     }
-    
+	
     return output;
 };
 
@@ -5947,14 +6576,14 @@ int within_which_volume(Coords pos, struct pointer_to_1d_int_list input_list, st
     // volume_logic_copy: A pointer to a integer array with at least length "number_of_volumes" (pre alocated for speed)
     // ListA: A pointer to a integer array with at least length "number_of_volumes" (pre alocated for speed)
     // ListB: A pointer to a integer array with at least length "number_of_volumes" (pre alocated for speed)
-    
+
     // Algorithm description
     // Check all of input list for pos being within them, those that have it within them are:
     //      checked against the current highest priority
     //          if higher, is the new highest priority and the new pick for volume
     //      have all their direct children added to the next list to be checked (but any volume can only be added to that list once)
     // Once a run have been made where the next list to check is empty, the answer for new pick for volume is taken.
-    
+
     // Mask update:
     // Algorithm description
     // Check all of input list for pos being within them, those that have it within them are:
@@ -5962,18 +6591,18 @@ int within_which_volume(Coords pos, struct pointer_to_1d_int_list input_list, st
     //          if higher, this is the new highest priority and the new pick for volume
     //      have all their direct children added to the next list to be checked (but any volume can only be added to that list once)
     // Once a run have been made where the next list to check is empty, the answer for new pick for volume is taken.
-    
+
     // The advantage of the method is that potentially large numbers of children are skipped when their parents do not contain the position.
     // The overhead cost is low, as all the lists are prealocated.
     // Should be checked which of the two implementations is faster, as this is much more complicated than simply checking all possibilities.
     // No within_function call should be made twice, as the same volume number will not be checked twice because of the properties of the direct_children list and the volume_logic that removes duplicates on each level.
-    
-    
+
+
     // This function uses too much memory, the memory required for the volume logic list is n_volumes^2 ints, or for a MACS monochromator 127000 ints.
     // Instead the original destinations list must be used, and a function for quick lookup in a (sorted) destinations list made.
     // Still need a list of n_volumes length for control to avoid adding the same volume to the list twice.
-    
-    
+
+
     int ListA_length=0,ListB_length=0;
     int done = 0;
     int i,direct_children_index;
@@ -5981,19 +6610,14 @@ int within_which_volume(Coords pos, struct pointer_to_1d_int_list input_list, st
     double max_priority=-1000000;
     int residing_volume=0; // 0 can be removed from the input list if default is 0
     int this_mask_status,mask_index,mask_global_index;
-    
-    // volume_logic_copy
-    //for (i=0;i<volume_logic.num_elements;i++) volume_logic_copy[i] = volume_logic.elements[i];
-    
+
     // low memory version of volume_logic_copy
     for (i=0;i<number_of_volumes;i++) volume_logic_copy[i] = 0;
     for (i=0;i<destinations_list.num_elements;i++) volume_logic_copy[destinations_list.elements[i]] = 1;
-    printf("within_which_volume debug %i\n",input_list.num_elements);
 
     // Does one loop through the algorithm first to set up ListA instead of copying it from input_list, which takes time
     for (i=0;i<input_list.num_elements;i++) {
             if (Volumes[input_list.elements[i]]->geometry.within_function(pos,&Volumes[input_list.elements[i]]->geometry) == 1) {
-                printf("The position is inside of volume %d\n",input_list.elements[i]);
                 if (Volumes[input_list.elements[i]]->geometry.is_masked_volume == 1) {
                     // if the volume is masked, I need to know if it can be a destination volume from the mask_status_list.
                     // if the masked volume is in ANY mode,
@@ -6015,7 +6639,7 @@ int within_which_volume(Coords pos, struct pointer_to_1d_int_list input_list, st
                     }
                     //printf("This volume is masked, and the mask status is %d\n",this_mask_status);
                 } else this_mask_status = 1; // if the volume is not masked
-            
+
                 if (Volumes[input_list.elements[i]]->geometry.priority_value > max_priority && this_mask_status == 1) {
                     max_priority = Volumes[input_list.elements[i]]->geometry.priority_value;
                     residing_volume = input_list.elements[i];
@@ -6070,26 +6694,17 @@ int within_which_volume(Coords pos, struct pointer_to_1d_int_list input_list, st
                     //printf("List B is now: ");
                     //for (direct_children_index=0;direct_children_index<ListB_length;direct_children_index++) printf("%d ",ListB[direct_children_index]);
                     //printf("\n");
-                    
-                    
+
+
                 }
             }
             if (ListB_length==0) done = 1;
             else {
-                
+
                 for (i=0;i<ListB_length;i++) ListA[i] = ListB[i];
                 ListA_length = ListB_length;
                 ListB_length = 0;
-                
-                /*
-                // Could do this with pointers instead to avoid this for loop (and needless copy)
-                // This code block fails on the cluster in rare circumstances
-                ListA = temp_pointer;
-                ListA = ListB;
-                ListB = temp_pointer;
-                ListA_length=ListB_length;
-                ListB_length=0;
-                */
+
             }
         }
     }
@@ -6107,14 +6722,14 @@ int within_which_volume_GPU(Coords pos, struct pointer_to_1d_int_list input_list
     // volume_logic_copy: A pointer to a integer array with at least length "number_of_volumes" (pre alocated for speed)
     // ListA: A pointer to a integer array with at least length "number_of_volumes" (pre alocated for speed)
     // ListB: A pointer to a integer array with at least length "number_of_volumes" (pre alocated for speed)
-    
+
     // Algorithm description
     // Check all of input list for pos being within them, those that have it within them are:
     //      checked against the current highest priority
     //          if higher, is the new highest priority and the new pick for volume
     //      have all their direct children added to the next list to be checked (but any volume can only be added to that list once)
     // Once a run have been made where the next list to check is empty, the answer for new pick for volume is taken.
-    
+
     // Mask update:
     // Algorithm description
     // Check all of input list for pos being within them, those that have it within them are:
@@ -6122,18 +6737,18 @@ int within_which_volume_GPU(Coords pos, struct pointer_to_1d_int_list input_list
     //          if higher, this is the new highest priority and the new pick for volume
     //      have all their direct children added to the next list to be checked (but any volume can only be added to that list once)
     // Once a run have been made where the next list to check is empty, the answer for new pick for volume is taken.
-    
+
     // The advantage of the method is that potentially large numbers of children are skipped when their parents do not contain the position.
     // The overhead cost is low, as all the lists are prealocated.
     // Should be checked which of the two implementations is faster, as this is much more complicated than simply checking all possibilities.
     // No within_function call should be made twice, as the same volume number will not be checked twice because of the properties of the direct_children list and the volume_logic that removes duplicates on each level.
-    
-    
+
+
     // This function uses too much memory, the memory required for the volume logic list is n_volumes^2 ints, or for a MACS monochromator 127000 ints.
     // Instead the original destinations list must be used, and a function for quick lookup in a (sorted) destinations list made.
     // Still need a list of n_volumes length for control to avoid adding the same volume to the list twice.
-    
-    
+
+
     int ListA_length=0,ListB_length=0;
     int done = 0;
     int i,direct_children_index;
@@ -6141,10 +6756,7 @@ int within_which_volume_GPU(Coords pos, struct pointer_to_1d_int_list input_list
     double max_priority=-1000000;
     int residing_volume=0; // 0 can be removed from the input list if default is 0
     int this_mask_status,mask_index,mask_global_index;
-    
-    // volume_logic_copy
-    //for (i=0;i<volume_logic.num_elements;i++) volume_logic_copy[i] = volume_logic.elements[i];
-    
+
     // low memory version of volume_logic_copy
     for (i=0;i<number_of_volumes;i++) volume_logic_copy[i] = 0;
     for (i=0;i<destinations_list.num_elements;i++) volume_logic_copy[destinations_list.elements[i]] = 1;
@@ -6175,7 +6787,7 @@ int within_which_volume_GPU(Coords pos, struct pointer_to_1d_int_list input_list
                     }
                     //printf("This volume is masked, and the mask status is %d\n",this_mask_status);
                 } else this_mask_status = 1; // if the volume is not masked
-            
+
                 if (Volumes[input_list.elements[i]]->geometry.priority_value > max_priority && this_mask_status == 1) {
                     max_priority = Volumes[input_list.elements[i]]->geometry.priority_value;
                     residing_volume = input_list.elements[i];
@@ -6227,29 +6839,15 @@ int within_which_volume_GPU(Coords pos, struct pointer_to_1d_int_list input_list
                                 volume_logic_copy[Volumes[ListA[i]]->geometry.direct_children.elements[direct_children_index]] = 0;
                             }
                         }
-                    //printf("List B is now: ");
-                    //for (direct_children_index=0;direct_children_index<ListB_length;direct_children_index++) printf("%d ",ListB[direct_children_index]);
-                    //printf("\n");
-                    
-                    
                 }
             }
             if (ListB_length==0) done = 1;
             else {
-                
+
                 for (i=0;i<ListB_length;i++) ListA[i] = ListB[i];
                 ListA_length = ListB_length;
                 ListB_length = 0;
-                
-                /*
-                // Could do this with pointers instead to avoid this for loop (and needless copy)
-                // This code block fails on the cluster in rare circumstances
-                ListA = temp_pointer;
-                ListA = ListB;
-                ListB = temp_pointer;
-                ListA_length=ListB_length;
-                ListB_length=0;
-                */
+
             }
         }
     }
@@ -6269,30 +6867,30 @@ int within_which_volume_debug(Coords pos, struct pointer_to_1d_int_list input_li
     // volume_logic_copy: A pointer to a integer array with at least length "number_of_volumes" (pre alocated for speed)
     // ListA: A pointer to a integer array with at least length "number_of_volumes" (pre alocated for speed)
     // ListB: A pointer to a integer array with at least length "number_of_volumes" (pre alocated for speed)
-    
+
     // Algorithm description
     // Check all of input list for pos being within them, those that have it within them are:
     //      checked against the current highest priority
     //          if higher, is the new highest priority and the new pick for volume
     //      have all their direct children added to the next list to be checked (but any volume can only be added to that list once)
     // Once a run have been made where the next list to check is empty, the answer for new pick for volume is taken.
-    
+
     // The advantage of the method is that potentially large numbers of children are skipped when their parents do not contain the position.
     // The overhead cost is low, as all the lists are prealocated.
     // Should be checked which of the two implementations is faster, as this is much more complicated than simply checking all possibilities.
     // No within_function call should be made twice, as the same volume number will not be checked twice because of the properties of the direct_children list and the volume_logic that removes duplicates on each level.
-    
-    
+
+
     int ListA_length=0,ListB_length=0;
     int done = 0;
     int i,direct_children_index;
     int *temp_pointer;
     double max_priority=-1000000;
     int residing_volume=0; // 0 can be removed from the input list if default is 0
-    
+
     // volume_logic_copy
     for (i=0;i<volume_logic.num_elements;i++) volume_logic_copy[i] = volume_logic.elements[i];
-    
+
     // Does one loop through the algorithm first to set up ListA instead of copying it from input_list, which takes time
     for (i=0;i<input_list.num_elements;i++) {
             if (Volumes[input_list.elements[i]]->geometry.within_function(pos,&Volumes[input_list.elements[i]]->geometry) == 1) {
@@ -6310,7 +6908,7 @@ int within_which_volume_debug(Coords pos, struct pointer_to_1d_int_list input_li
     }
     if (ListA_length > 0) {
         while (done == 0) {
-        
+
             printf("ListA = [");
             for (i=0;i<ListA_length;i++) {
                 printf("%d,",ListA[i]);
@@ -6334,7 +6932,7 @@ int within_which_volume_debug(Coords pos, struct pointer_to_1d_int_list input_li
             }
             if (ListB_length==0) done = 1;
             else {
-                ListA = temp_pointer;
+                temp_pointer = ListA;
                 ListA = ListB;
                 ListB = temp_pointer;
                 ListA_length=ListB_length;
@@ -6399,6 +6997,30 @@ int inside_function(struct Volume_struct *parent_volume, struct Volume_struct *c
     else if (strcmp("box",parent_volume->geometry.shape) == 0 && strcmp("cone",child_volume->geometry.shape) == 0) {
         if (cone_within_box(&child_volume->geometry,&parent_volume->geometry)) return 1;
     }
+    else if (strcmp("mesh",parent_volume->geometry.shape) == 0 && strcmp("cylinder",child_volume->geometry.shape) == 0) {
+        if (cylinder_within_mesh(&child_volume->geometry,&parent_volume->geometry)) return 1;
+    }
+    else if (strcmp("mesh",parent_volume->geometry.shape) == 0 && strcmp("sphere",child_volume->geometry.shape) == 0) {
+        if (sphere_within_mesh(&child_volume->geometry,&parent_volume->geometry)) return 1;
+    }
+    else if (strcmp("cone",parent_volume->geometry.shape) == 0 && strcmp("mesh",child_volume->geometry.shape) == 0) {
+        if (mesh_within_cone(&child_volume->geometry,&parent_volume->geometry)) return 1;
+    }
+    else if (strcmp("mesh",parent_volume->geometry.shape) == 0 && strcmp("cone",child_volume->geometry.shape) == 0) {
+        if (cone_within_mesh(&child_volume->geometry,&parent_volume->geometry)) return 1;
+    }
+    else if (strcmp("cylinder",parent_volume->geometry.shape) == 0 && strcmp("mesh",child_volume->geometry.shape) == 0) {
+        if (cylinder_within_mesh(&child_volume->geometry,&parent_volume->geometry)) return 1;
+    }
+    else if (strcmp("sphere",parent_volume->geometry.shape) == 0 && strcmp("mesh",child_volume->geometry.shape) == 0) {
+        if (mesh_within_sphere(&child_volume->geometry,&parent_volume->geometry)) return 1;
+    }
+    else if (strcmp("mesh",parent_volume->geometry.shape) == 0 && strcmp("box",child_volume->geometry.shape) == 0) {
+        if (box_within_mesh(&child_volume->geometry,&parent_volume->geometry)) return 1;
+    }
+    else if (strcmp("box",parent_volume->geometry.shape) == 0 && strcmp("mesh",child_volume->geometry.shape) == 0) {
+        if (mesh_within_box(&child_volume->geometry,&parent_volume->geometry)) return 1;
+    }
     else {
         #ifndef OPENACC
         printf("Need within function for type: ");
@@ -6407,7 +7029,7 @@ int inside_function(struct Volume_struct *parent_volume, struct Volume_struct *c
         printf("%s",child_volume->geometry.shape);
         printf(".\n");
         printf("It is not yet supported to mix mesh geometries with the basic shapes, but several mesh geometries are allowed.\n");
-        exit(1);
+        exit(EXIT_FAILURE);
 	#endif
     }
     
@@ -6427,48 +7049,65 @@ void generate_children_lists(struct Volume_struct **Volumes, struct pointer_to_1
   // Mask update: Creating a temporary list for each volume
   struct pointer_to_1d_int_list *temporary_children_lists;
   temporary_children_lists = malloc(number_of_volumes*sizeof(struct pointer_to_1d_int_list));
-
+  if (!temporary_children_lists) {
+    fprintf(stderr,"Failure allocating list in Union function generate_children_lists 1 - Exit!\n");
+    exit(EXIT_FAILURE);
+  }
   // The surrounding vacuum, volume 0, done outside of for loop.
   temporary_children_lists[0].num_elements = number_of_volumes - 1;
   temporary_children_lists[0].elements = malloc(temporary_children_lists[0].num_elements*sizeof(int));
-  
+
   int parent;
   for (parent=1;parent<number_of_volumes;parent++) {
       temporary_children_lists[0].elements[parent-1] = parent;
   }
-  
-  //if (verbal) printf("did temporary children list \n");
-  //print_1d_int_list(temporary_children_lists[0],"temp children list [0]");
-  
+
   // Hardcoding that every volume is a child of the surrounding vacuum
   Volumes[0]->geometry.children.num_elements = number_of_volumes-1;
   Volumes[0]->geometry.children.elements = malloc((number_of_volumes-1)*sizeof(int));
+  if (!Volumes[0]->geometry.children.elements) {
+    fprintf(stderr,"Failure allocating list in Union function generate_children_lists 2 - Exit!\n");
+    exit(EXIT_FAILURE);
+  }
   true_children_lists[0] = malloc(sizeof(struct pointer_to_1d_int_list));
+  if (!true_children_lists[0]) {
+    fprintf(stderr,"Failure allocating list in Union function generate_children_lists 3 - Exit!\n");
+    exit(EXIT_FAILURE);
+  }
   true_children_lists[0]->num_elements = number_of_volumes - 1;
   true_children_lists[0]->elements = malloc((number_of_volumes-1)*sizeof(int));
-  
-  //if (verbal) printf("allocated true children lists \n");
+  if (!true_children_lists[0]->elements) {
+    fprintf(stderr,"Failure allocating list in Union function generate_children_lists 4 - Exit!\n");
+    exit(EXIT_FAILURE);
+  }
   
   for (parent=1;parent<number_of_volumes;parent++) {
       Volumes[0]->geometry.children.elements[parent-1] = parent;
       true_children_lists[0]->elements[parent-1] = parent;
   }
-  
+
   char string_output[128];
   MPI_MASTER(
   if (verbal) sprintf(string_output,"Children for Volume %d",0);
   if (verbal) print_1d_int_list(Volumes[0]->geometry.children,string_output);
   )
-  
-  
+
   // Generating the children lists for all other volumes using the appropriate geometry functions
   struct pointer_to_1d_int_list temp_list_local;
   temp_list_local.num_elements = number_of_volumes;
   temp_list_local.elements = malloc(number_of_volumes*sizeof(int));
+  if (!temp_list_local.elements) {
+    fprintf(stderr,"Failure allocating list in Union function generate_children_lists 5 - Exit!\n");
+    exit(EXIT_FAILURE);
+  }
   
   struct pointer_to_1d_int_list true_temp_list_local;
   true_temp_list_local.num_elements = number_of_volumes;
   true_temp_list_local.elements = malloc(number_of_volumes*sizeof(int));
+  if (!true_temp_list_local.elements) {
+    fprintf(stderr,"Failure allocating list in Union function generate_children_lists 6 - Exit!\n");
+    exit(EXIT_FAILURE);
+  }
   
   
   int child,used_elements,used_elements_true;
@@ -6488,24 +7127,24 @@ void generate_children_lists(struct Volume_struct **Volumes, struct pointer_to_1
       // Assing the children list to a temporary list as the masks have yet to be taken into account
       temporary_children_lists[parent].num_elements=0;
       allocate_list_from_temp(used_elements_true,true_temp_list_local,&temporary_children_lists[parent]);
-      
-      
+
+
       MPI_MASTER(
       if (verbal) sprintf(string_output,"Children for Volume %d (temporary_list)",parent);
       if (verbal) print_1d_int_list(temporary_children_lists[parent],string_output);
       )
-      
+
       MPI_MASTER(
       if (verbal) sprintf(string_output,"Children for Volume %d (permanent_list)",parent);
       if (verbal) print_1d_int_list(Volumes[parent]->geometry.children,string_output);
       )
-      
+
   }
-  
+
   // mask update:
   // The logical expression: (child c parent AND child c parent_mask) OR (child_mask c parent AND child_mask c parent_mask)
   //  needs to be evaluated for each child / parent combination in order to take the masks of each into account
-  
+
   int logic_var1,logic_var2,logic_var_ANY,logic_var_ALL;
   int mask_index,mask_index_child,mask_index_parent;
   int volume_C,volume_P;
@@ -6516,7 +7155,7 @@ void generate_children_lists(struct Volume_struct **Volumes, struct pointer_to_1
      if (child != parent && 0 == on_int_list(Volumes[parent]->geometry.masked_by_list,child)) {
         // The children list for each volume does not need to contain the volume itself
         //  And a parent masked by it's child can not have that mask as a child
-      
+
       // Here c means within in the sense of a set being part of another set
       // Logical expression to be evaluated: (child c parent AND child c parent_mask) OR (child_mask c parent AND child_mask c parent_mask)
       logic_var1 = on_int_list(temporary_children_lists[parent],child);
@@ -6533,15 +7172,15 @@ void generate_children_lists(struct Volume_struct **Volumes, struct pointer_to_1
         }
         if (Volumes[parent]->geometry.mask_mode == 2) logic_var1 = logic_var_ANY;
       }
-      
+
       if (logic_var1 == 1) true_temp_list_local.elements[used_elements++] = child;
       else if (Volumes[child]->geometry.is_masked_volume == 1) {
         // If the first side of the logical expression is false, evalute the other side
         // The other side is only relevant if the child volume is masked, otherwise it is ignored
         //printf("Second side of logical expression \n");
-        
+
         logic_var1 = 1; // Assume true
-          
+
         // child_mask c parent
         logic_var_ALL = 0;
         for (mask_index=0;mask_index<Volumes[child]->geometry.masked_by_list.num_elements;mask_index++) {
@@ -6553,15 +7192,15 @@ void generate_children_lists(struct Volume_struct **Volumes, struct pointer_to_1
           } else logic_var_ALL = 1;
         }
         if (Volumes[child]->geometry.mask_mode == 1) logic_var1 = logic_var_ALL;
-        
+
         // This line allows the second part of the logical expression to be true in cases where the parent volume is not masked
         if (logic_var1 == 1 && Volumes[parent]->geometry.is_masked_volume == 0) true_temp_list_local.elements[used_elements++] = child;
-        
+
         // There is no reason to check the other part (child_mask c parent_mask) if the first part was not true
         if (logic_var1 == 1 && Volumes[parent]->geometry.is_masked_volume == 1) {
           // This last part requires both the child and the parent to be masked
           // Need to evaluate (child_mask c parent_mask), where both can be a be a list of volume with ALL/ANY modes
-          
+
           if (Volumes[parent]->geometry.mask_mode == 1) {
             logic_var2 = 1; // Assume the logical expression (child_mask c parent_mask) is true
             for (mask_index_parent=0;mask_index_parent<Volumes[parent]->geometry.masked_by_list.num_elements;mask_index_parent++) {
@@ -6605,28 +7244,31 @@ void generate_children_lists(struct Volume_struct **Volumes, struct pointer_to_1
               if (logic_var2 == 1) break; // No need to continue
             }
           }
-          
+
           // if this point is reached, and logic_var2 is true, volume[child] is a child of volume[parent]
           if (logic_var2 == 1) true_temp_list_local.elements[used_elements++] = child;
-          
+
         }
       }
      }
     }
-    
+
     true_children_lists[parent] = malloc(sizeof(struct pointer_to_1d_int_list));
+    if (!true_children_lists[parent]) {
+      fprintf(stderr,"Failure allocating list in Union function generate_children_lists 7 - Exit!\n");
+      exit(EXIT_FAILURE);
+    }
     true_children_lists[parent]->num_elements = 0;
     allocate_list_from_temp(used_elements,true_temp_list_local,true_children_lists[parent]);
-    
+
     MPI_MASTER(
       if (verbal) sprintf(string_output,"True children for Volume (post mask) %d",parent);
       if (verbal) print_1d_int_list(*true_children_lists[parent],string_output);
     )
   }
-  
-  
+
   // Clean up of dynamically allocated memory
-  
+
   for(child=0;child<number_of_volumes;child++) free(temporary_children_lists[child].elements);
   free(temporary_children_lists);
   free(true_temp_list_local.elements);
@@ -6641,47 +7283,74 @@ void generate_overlap_lists(struct pointer_to_1d_int_list **true_overlap_lists, 
   MPI_MASTER(
   if (verbal) printf("\nGenerating overlap lists ---------------------------- \n");
   )
-  
+
   // Manually create the overlap list for the surrounding Vacuum, as it overlaps all other volumes
-  
+
   // temporary_overlap_lists are used to save the calculated overlaps to avoid evaluating the heavy functions more than once (twice) for each possible volume pair
   struct pointer_to_1d_int_list *temporary_overlap_lists;
   temporary_overlap_lists = malloc(number_of_volumes*sizeof(struct pointer_to_1d_int_list));
+  if (!temporary_overlap_lists) {
+    fprintf(stderr,"Failure allocating list in Union function generate_overlap_lists 1 - Exit!\n");
+    exit(EXIT_FAILURE);
+  }
   
   // Overlap_lists are the final result of the function, and for the surrounding volume it can be set immediatly
   true_overlap_lists[0] = malloc(sizeof(struct pointer_to_1d_int_list));
+  if (!true_overlap_lists[0]) {
+    fprintf(stderr,"Failure allocating list in Union function generate_overlap_lists 2 - Exit!\n");
+    exit(EXIT_FAILURE);
+  }
   true_overlap_lists[0]->num_elements = number_of_volumes-1;
   true_overlap_lists[0]->elements = malloc((number_of_volumes-1)*sizeof(int));
-  
+  if (!true_overlap_lists[0]->elements) {
+    fprintf(stderr,"Failure allocating list in Union function generate_overlap_lists 3 - Exit!\n");
+    exit(EXIT_FAILURE);
+  }
   raw_overlap_lists[0] =  malloc(sizeof(struct pointer_to_1d_int_list));
+  if (!raw_overlap_lists[0]) {
+    fprintf(stderr,"Failure allocating list in Union function generate_overlap_lists 4 - Exit!\n");
+    exit(EXIT_FAILURE);
+  }
   raw_overlap_lists[0]->num_elements = number_of_volumes;
   raw_overlap_lists[0]->elements = malloc(number_of_volumes*sizeof(int));
+  if (!raw_overlap_lists[0]->elements) {
+    fprintf(stderr,"Failure allocating list in Union function generate_overlap_lists 5 - Exit!\n");
+    exit(EXIT_FAILURE);
+  }
   raw_overlap_lists[0]->elements[0] = 0; // Volume 0 overlaps itself
-  
+
   int parent;
   for (parent=1;parent<number_of_volumes;parent++) {
       true_overlap_lists[0]->elements[parent-1] = parent;
       raw_overlap_lists[0]->elements[parent] = parent;
   }
-  
+
   char string_output[128];
   MPI_MASTER(
   if (verbal) sprintf(string_output,"Overlaps for Volume %d",0);
   if (verbal) print_1d_int_list(*true_overlap_lists[0],string_output);
   )
-  
+
   // Generate the overlap lists for the remaining volumes
   struct pointer_to_1d_int_list temp_list_local;
   temp_list_local.num_elements = number_of_volumes;
   temp_list_local.elements = malloc(number_of_volumes*sizeof(int));
+  if (!temp_list_local.elements) {
+    fprintf(stderr,"Failure allocating list in Union function generate_overlap_lists 6 - Exit!\n");
+    exit(EXIT_FAILURE);
+  }
   
   int child,used_elements;
   // Create overlap for the remaining volumes
   for (parent=1;parent<number_of_volumes;parent++) {
       true_overlap_lists[parent] = malloc(sizeof(struct pointer_to_1d_int_list));
+      if (!true_overlap_lists[parent]) {
+	fprintf(stderr,"Failure allocating list in Union function generate_overlap_lists 7 - Exit!\n");
+	exit(EXIT_FAILURE);
+      }
       used_elements = 0;
       temp_list_local.elements[used_elements++] = 0; // Alwasy overlaps with the surrounding vacuum.
-      
+
       for (child=1;child<number_of_volumes;child++) {
         if (child == parent) temp_list_local.elements[used_elements++] = child;
         else {
@@ -6736,40 +7405,65 @@ void generate_overlap_lists(struct pointer_to_1d_int_list **true_overlap_lists, 
         else if (strcmp("box",Volumes[parent]->geometry.shape) == 0 && strcmp("cone",Volumes[child]->geometry.shape) == 0) {
             if (box_overlaps_cone(&Volumes[parent]->geometry,&Volumes[child]->geometry)) temp_list_local.elements[used_elements++] = child;
         }
+        else if (strcmp("mesh",Volumes[parent]->geometry.shape) == 0 && strcmp("sphere",Volumes[child]->geometry.shape) == 0) {
+            if (mesh_overlaps_sphere(&Volumes[parent]->geometry,&Volumes[child]->geometry)) temp_list_local.elements[used_elements++] = child;
+        }
+        else if (strcmp("mesh",Volumes[parent]->geometry.shape) == 0 && strcmp("cylinder",Volumes[child]->geometry.shape) == 0) {
+            if (mesh_overlaps_cylinder(&Volumes[parent]->geometry,&Volumes[child]->geometry)) temp_list_local.elements[used_elements++] = child;
+        }
+        else if (strcmp("mesh",Volumes[parent]->geometry.shape) == 0 && strcmp("box",Volumes[child]->geometry.shape) == 0) {
+            if (mesh_overlaps_box(&Volumes[parent]->geometry,&Volumes[child]->geometry)) temp_list_local.elements[used_elements++] = child;
+        }
+        else if (strcmp("mesh",Volumes[parent]->geometry.shape) == 0 && strcmp("cone",Volumes[child]->geometry.shape) == 0) {
+            if (mesh_overlaps_cone(&Volumes[parent]->geometry,&Volumes[child]->geometry)) temp_list_local.elements[used_elements++] = child;
+        }
+        else if (strcmp("sphere",Volumes[parent]->geometry.shape) == 0 && strcmp("mesh",Volumes[child]->geometry.shape) == 0) {
+            if (sphere_overlaps_mesh(&Volumes[parent]->geometry,&Volumes[child]->geometry)) temp_list_local.elements[used_elements++] = child;
+        }
+        else if (strcmp("cylinder",Volumes[parent]->geometry.shape) == 0 && strcmp("mesh",Volumes[child]->geometry.shape) == 0) {
+            if (cylinder_overlaps_mesh(&Volumes[parent]->geometry,&Volumes[child]->geometry)) temp_list_local.elements[used_elements++] = child;
+        }
+        else if (strcmp("box",Volumes[parent]->geometry.shape) == 0 && strcmp("mesh",Volumes[child]->geometry.shape) == 0) {
+            if (box_overlaps_mesh(&Volumes[parent]->geometry,&Volumes[child]->geometry)) temp_list_local.elements[used_elements++] = child;
+        }
+        else if (strcmp("cone",Volumes[parent]->geometry.shape) == 0 && strcmp("mesh",Volumes[child]->geometry.shape) == 0) {
+            if (cone_overlaps_mesh(&Volumes[parent]->geometry,&Volumes[child]->geometry)) temp_list_local.elements[used_elements++] = child;
+        }
         else {
             printf("Need overlap function for type: ");
             printf("%s",Volumes[parent]->geometry.shape);
             printf(" and type: ");
             printf("%s",Volumes[child]->geometry.shape);
             printf(".\n");
-            printf("It is not yet supported to mix mesh geometries with the basic shapes, but several mesh geometries are allowed.\n");
             exit(1);
         }
         }
       }
       //allocate_list_from_temp(used_elements,temp_list_local,overlap_lists[parent]);
       allocate_list_from_temp(used_elements,temp_list_local,&temporary_overlap_lists[parent]);
-      
+
       // Save the raw overlap data to the raw_overlap_lists[parent] list
       raw_overlap_lists[parent] = malloc(sizeof(struct pointer_to_1d_int_list));
+      if (!raw_overlap_lists[parent]) {
+	fprintf(stderr,"Failure allocating list in Union function generate_overlap_lists 8 - Exit!\n");
+	exit(EXIT_FAILURE);
+      }
       raw_overlap_lists[parent]->num_elements = 0;
       allocate_list_from_temp(used_elements,temp_list_local,raw_overlap_lists[parent]);
-      
+
       if (verbal) sprintf(string_output,"Overlaps for Volume (pre mask) %d",parent);
       MPI_MASTER(
       if (verbal) print_1d_int_list(temporary_overlap_lists[parent],string_output);
       )
   }
-  
-  
+
   // The temporary_overlap_lists gives the raw overlap data for all volume pairs
   // The next tasks is to take the masks into account, so that a volume is only said to overlap another if all of these statements are true:
   // The volumes overlap each other
   // The mask's of volume 1 overlap volume 2
   // The mask's of volume 2 overlap volume 1
   // The mask's of volume 1 overlap the masks of volume 2
-  
-  
+
   int logic_var;
   int overlap_ANY,overlap_ANY_p,overlap_ANY_c;
   int mask_index,mask_index_c,mask_index_p;
@@ -6781,11 +7475,10 @@ void generate_overlap_lists(struct pointer_to_1d_int_list **true_overlap_lists, 
     for (child=1;child<number_of_volumes;child++) {
       if (child != parent) {
         logic_var = 1; // Assume the volumes overlap, and search for evidence that they do not.
-      
+
         // First check if the volumes overlap
         if (0 == on_int_list(temporary_overlap_lists[parent],child)) logic_var = 0;
-        
-      
+
         // Check if child overlap with parents masks
         if (logic_var == 1 && Volumes[parent]->geometry.is_masked_volume == 1) {
           overlap_ANY = 0;
@@ -6800,7 +7493,7 @@ void generate_overlap_lists(struct pointer_to_1d_int_list **true_overlap_lists, 
           }
           if (Volumes[parent]->geometry.mask_mode == 2) logic_var = overlap_ANY;
         }
-      
+
         // Check if parent overlap with childs masks
         if (logic_var == 1 && Volumes[child]->geometry.is_masked_volume == 1) {
           overlap_ANY = 0;
@@ -6815,7 +7508,7 @@ void generate_overlap_lists(struct pointer_to_1d_int_list **true_overlap_lists, 
           }
           if (Volumes[child]->geometry.mask_mode == 2) logic_var = overlap_ANY;
         }
-      
+
         // Check if parents masks overlap childrens masks
         if (logic_var == 1 && Volumes[parent]->geometry.is_masked_volume == 1 && Volumes[child]->geometry.is_masked_volume == 1) {
           overlap_ANY = 0;
@@ -6836,7 +7529,7 @@ void generate_overlap_lists(struct pointer_to_1d_int_list **true_overlap_lists, 
                   overlap_ANY_p = 0;
                   break;
                 }
-                
+
               } else {
                 // Here because mask_volume_index_p and mask_volume_index_c does overlap
                 if (Volumes[parent]->geometry.mask_mode == 1 && Volumes[child]->geometry.mask_mode == 2) {
@@ -6849,7 +7542,7 @@ void generate_overlap_lists(struct pointer_to_1d_int_list **true_overlap_lists, 
                   // Could actually just commit to the overlap list here, and stop all loops.
                 }
               }
-              
+
             }
             if (Volumes[parent]->geometry.mask_mode == 1 && Volumes[child]->geometry.mask_mode == 2) logic_var = overlap_ANY_c;
             if (Volumes[parent]->geometry.mask_mode == 2 && Volumes[child]->geometry.mask_mode == 1 && overlap_ANY_p == 1) {
@@ -6862,10 +7555,10 @@ void generate_overlap_lists(struct pointer_to_1d_int_list **true_overlap_lists, 
           if (Volumes[parent]->geometry.mask_mode == 2 && Volumes[child]->geometry.mask_mode == 2) logic_var = overlap_ANY;
           // If both volumes have the ANY mode, just one case of overlap is enough.
         }
-        
+
         // If all of the 4 statements above evaluate to true, the two volumes parent and child do overlap and it is added to the list.
         if (logic_var == 1) temp_list_local.elements[used_elements++] = child;
-        
+
       }
     }
     // Allocate the actual overlap list with the new temp_list_local
@@ -6875,12 +7568,12 @@ void generate_overlap_lists(struct pointer_to_1d_int_list **true_overlap_lists, 
     if (verbal) print_1d_int_list(*true_overlap_lists[parent],string_output);
     )
   }
-  
+
   // Clean up of dynamically allocated memory
   for(child=1;child<number_of_volumes;child++) free(temporary_overlap_lists[child].elements);
   free(temporary_overlap_lists);
   free(temp_list_local.elements);
-  
+
 };
 
 void add_to_mask_intersect_list(struct pointer_to_1d_int_list *mask_intersect_list, int given_volume_index) {
@@ -6898,17 +7591,17 @@ void generate_intersect_check_lists(struct pointer_to_1d_int_list **overlap_list
   // Take overlap list for volume n
   // Remove entries with p < p(n)
   // Remove entries with parents on the list
-  
+
   // Mask update: Mask volumes does not have priorities, do not do step 2 for mask volumes
   // Mask update: Instead of step 3 (Remove entries with parents on the list), move these entries to a Mask intersect list if that parent is masking the entry, otherwise remove
-  
+
   // 1) Mask update: Take overlap list for volume n
   // 2) Mask update: Remove entries with p < p(n), except mask volumes, that are moved to another list A
   // 3) Mask update: Entries with parents on the list are removed (if these parents are masked, only remove the entry if it is a child of their parents masks)
   // 4) Possible optimization: Entries with parents on the A list, are moved to the appropriate mask list for this volume
   // 5) Mask update: Entries on list A are added again, if they are not parents of volume n
   // 6) Mask update: Entries on the main list that are masked are moved to the appropriate mask list for this volume, if their mask is on list A
-  
+
   // Justification of the top algorithm:
   // No need to check intersections with something that does not overlap this volume, so start with intersect list and remove from that.
   // Entries with p < p(n) are "beneath" this volume, and thus doesn't cut it, mask volumes are however always "above" and are treated with care (moved to list A)
@@ -6916,68 +7609,46 @@ void generate_intersect_check_lists(struct pointer_to_1d_int_list **overlap_list
   // Entries with parents on the A list can only be seen if the ray is in that particular mask (the parent on the A list), so it can be added to the appropriate mask list for this volume
   // Now all masks that cut the volume are transfered back to the main list, the only masks that overlap and does not cut are parents of this volume, and these are thus not added
   // The entries on the list that are masked are added to the appropriate mask lists of this volume, but only if their mask is on the A list, as only masks on list A can have mask status 1 which is required for this to be relevant (this was true automatically for the ones added to the appropriate lists in the optimization step).
-  
-  
+
+
   // The intersect check list for volume 0 is done manually
   // Declare list for holding logic data for each index in the overlap list of this volume
   struct pointer_to_1d_int_list logic_list;
   logic_list.num_elements = overlap_lists[0]->num_elements;
   logic_list.elements = malloc(logic_list.num_elements * sizeof(int));
-  
+  if (!logic_list.elements) {
+    fprintf(stderr,"Failure allocating list in Union function generate_overlap_lists 9 - Exit!\n");
+    exit(EXIT_FAILURE);
+  }
   // Declare similar list for List A
   struct pointer_to_1d_int_list mask_logic_list;
   mask_logic_list.num_elements = overlap_lists[0]->num_elements;
   mask_logic_list.elements = malloc(mask_logic_list.num_elements * sizeof(int));
-  
+  if (!mask_logic_list.elements) {
+    fprintf(stderr,"Failure allocating list in Union function generate_overlap_lists 10 - Exit!\n");
+    exit(EXIT_FAILURE);
+  }
   
   int iterate;
   int overlap_index;
   
-  /*
-  // Thise code is an old broken version of intersection_check_list generation only for volume 0, but this case is now included in the loop.
-  // Assume all volumes on overlap list should be on intersection check list, and remove the once that should not.
-  for (iterate=0;iterate<logic_list.num_elements;iterate++) logic_list.elements[iterate] = 1;
-  // Asuume no volumes should go on the mask_logic_list, but add the ones that do.
-  for (iterate=0;iterate<mask_logic_list.num_elements;iterate++) mask_logic_list.elements[iterate] = 0;
-  
-  for (overlap_index = 0;overlap_index < overlap_lists[0]->num_elements;overlap_index++) {
-    // No volumes to remove with lower priority, as surrounding vacuum have the lowest.
-    
-    // Check if this overlap_lists[0]->elements[overlap_index] is a child of another member of the overlap list
-    for (iterate = 0;iterate < overlap_lists[0]->num_elements;iterate++) {
-        if (iterate != overlap_index) {
-            // We are now checking if Volumes[overlap_lists[0]->elements[iterate]]->geometry.children contains overlap_lists[overlap_index]
-            if (on_int_list(Volumes[overlap_lists[0]->elements[iterate]]->geometry.children,overlap_lists[0]->elements[overlap_index])) logic_list.elements[overlap_index] = 0;
-        }
-    }
-  }
-
-  Volumes[0]->geometry.intersect_check_list.num_elements = sum_int_list(logic_list);
-  Volumes[0]->geometry.intersect_check_list.elements = malloc(Volumes[0]->geometry.intersect_check_list.num_elements * sizeof(int));
-  
-  iterate = 0;
-  for (overlap_index = 0;overlap_index < overlap_lists[0]->num_elements;overlap_index++) {
-        if (logic_list.elements[overlap_index])   Volumes[0]->geometry.intersect_check_list.elements[iterate++] = overlap_lists[0]->elements[overlap_index];
-  }
-  if (logic_list.num_elements > 0) free(logic_list.elements);
-  if (mask_logic_list.num_elements > 0) free(mask_logic_list.elements);
-  
-  MPI_MASTER(
-  print_1d_int_list(Volumes[0]->geometry.intersect_check_list,"Intersect check list for Volume 0 (manual)");
-  )
-  */
-  
   // The intersect check lists for the remaining volumes are generated
   int volume_index,mask_volume_number,mask_index;
-  //for (volume_index = 1;volume_index < number_of_volumes;volume_index++) {
   for (volume_index = 0;volume_index < number_of_volumes;volume_index++) {
-    
+
       // 1) Take overlap list for volume n
       logic_list.num_elements = overlap_lists[volume_index]->num_elements;
       logic_list.elements = malloc(logic_list.num_elements * sizeof(int));
+      if (!logic_list.elements) {
+	fprintf(stderr,"Failure allocating list in Union function generate_overlap_lists 11 - Exit!\n");
+	exit(EXIT_FAILURE);
+      }
       mask_logic_list.num_elements = overlap_lists[volume_index]->num_elements;
       mask_logic_list.elements = malloc(mask_logic_list.num_elements * sizeof(int));
-      
+      if (!mask_logic_list.elements) {
+	fprintf(stderr,"Failure allocating list in Union function generate_overlap_lists 11 - Exit!\n");
+	exit(EXIT_FAILURE);
+      }
       
       
       if (Volumes[volume_index]->geometry.is_mask_volume == 1) {
@@ -6988,10 +7659,10 @@ void generate_intersect_check_lists(struct pointer_to_1d_int_list **overlap_list
         for (iterate=0;iterate<logic_list.num_elements;iterate++) logic_list.elements[iterate] = 1;
         for (iterate=0;iterate<mask_logic_list.num_elements;iterate++) mask_logic_list.elements[iterate] = 0;
       }
-      
+
       //2) Remove entries with p < p(n), except mask volumes, that are moved to another list A
       for (overlap_index = 0;overlap_index < overlap_lists[volume_index]->num_elements;overlap_index++) {
-        
+
         if (overlap_lists[volume_index]->elements[overlap_index] == 0) logic_list.elements[overlap_index] = 0; // The surrounding vacuum has lower priority (and is not a mask)
         else if (Volumes[overlap_lists[volume_index]->elements[overlap_index]]->geometry.is_mask_volume == 1) {
            logic_list.elements[overlap_index] = 0;      // Remove this volume from the main list
@@ -7004,7 +7675,7 @@ void generate_intersect_check_lists(struct pointer_to_1d_int_list **overlap_list
            }
         }
       }
-      
+
       // 3) Entries with parents on the list are removed
       for (overlap_index = 0;overlap_index < overlap_lists[volume_index]->num_elements;overlap_index++) {
         // Check if this overlap_lists[0]->elements[overlap_index] is a child of another member of the overlap list
@@ -7012,30 +7683,30 @@ void generate_intersect_check_lists(struct pointer_to_1d_int_list **overlap_list
              if (iterate != overlap_index) { // Only necessary if a volume determines that it has itself as child, but a nice safety.
                 // We are now checking if Volumes[overlap_lists[volume_index]->elements[iterate]]->geometry.children contains overlap_lists[overlap_index]
                 // The && part is needed because we do not remove children of elements that have allready been removed because of their priority
-                
+
                 // if (on_int_list(Volumes[overlap_lists[volume_index]->elements[iterate]]->geometry.children,overlap_lists[volume_index]->elements[overlap_index]) && logic_list.elements[overlap_lists[volume_index]->elements[iterate]] == 1) {logic_list.elements[overlap_index] = 0; bug fixed on 3/4 2016
                 if (on_int_list(Volumes[overlap_lists[volume_index]->elements[iterate]]->geometry.children,overlap_lists[volume_index]->elements[overlap_index]) && logic_list.elements[iterate] == 1) logic_list.elements[overlap_index] = 0;
-                
+
                 /*
                 Explanation with simpler notation
-                
+
                 Overlap list of volume i = O_i
                 Element j of overlap list i = O_i(j)
-                
+
                 Children list of volume i = C_i
                 Element j on children list i = C_i(j)
-                
+
                 Priority of volume i p(i)
-                
+
                 for i = volumes
-                    for j in O_i(j) 
+                    for j in O_i(j)
                         logic(j) = 1;
                         if p(i) > p(O_i(j)) logic(j) = 0; // Remove if lower priority than the currently checked
-                        
+
                         for k in O_i(k)
                             if (O_i(j) is contained on the list C_k && logic(k) == 1) logic(j) = 0
                 */
-                
+
                 // 4) Entries with parents on the A list, are moved to the appropriate mask list for this volume
                 if (on_int_list(Volumes[overlap_lists[volume_index]->elements[iterate]]->geometry.children,overlap_lists[volume_index]->elements[overlap_index]) && mask_logic_list.elements[iterate] == 1) {
                    logic_list.elements[overlap_index] = 0; // Remove from main list (Not strictly needed as it will be removed already if it is on list A)
@@ -7044,11 +7715,11 @@ void generate_intersect_check_lists(struct pointer_to_1d_int_list **overlap_list
                    // Simpler method that just collects all the masked intersect parts on a 1d_int list instead of seperating them for each mask
                    add_to_mask_intersect_list(&Volumes[volume_index]->geometry.mask_intersect_list,overlap_lists[volume_index]->elements[overlap_index]);
                 }
-                
+
              }
         }
       }
-      
+
       // 5) Entries on list A are added again, if they are not parents of volume n
       // Time to add mask volumes removed back to the intersect list, if they are not parents of the current volume, meaning the current volume should not be a child of the mask
       for (overlap_index = 0;overlap_index < overlap_lists[volume_index]->num_elements;overlap_index++) {
@@ -7057,24 +7728,24 @@ void generate_intersect_check_lists(struct pointer_to_1d_int_list **overlap_list
           if (on_int_list(Volumes[mask_volume_number]->geometry.children,volume_index) == 0) logic_list.elements[overlap_index] = 1; // Add it back to the list
         }
       }
-      
+
       // 6) Entries on the main list that are masked are moved to the appropriate mask list for this volume, if their mask is on list A
       int mask_index,mask_mode,found_index,logic_ALL;
       for (overlap_index = 0;overlap_index < overlap_lists[volume_index]->num_elements;overlap_index++) {
         if (logic_list.elements[overlap_index] == 1 && Volumes[overlap_lists[volume_index]->elements[overlap_index]]->geometry.is_masked_volume == 1) {
           logic_list.elements[overlap_index] = 0; // If the volume is masked, remove it from the intersect check list
           // Could actually keep it on the intersect list if the volume's mask is a parent of the current volume, now it will just be added in all cases
-          
+
           // When ALL setting is used, all masks should overlap the current volume, otherwise the user probably made a mistake, this should be checked in error checking
           // When ANY setting is used, at least one mask should overlap the current volume, otherwise the user probably made a mistake, this should be checked in error checking
           // mask_mode == 1 => ALL / mask_mode == 2 => ANY
           mask_mode = Volumes[overlap_lists[volume_index]->elements[overlap_index]]->geometry.mask_mode;
-          
+
           if (mask_mode == 1) {
             logic_ALL = 1;
             for (iterate=0;iterate<Volumes[overlap_lists[volume_index]->elements[overlap_index]]->geometry.masked_by_list.num_elements;iterate++) {
               mask_index = Volumes[overlap_lists[volume_index]->elements[overlap_index]]->geometry.masked_by_list.elements[iterate];
-              
+
               if (on_int_list(*overlap_lists[volume_index],mask_index) == 0) {
                 // If any one of the volumes masks do not overlap with this volume, there is no reason check intersections with the volume regardless of the mask status's
                 logic_ALL = 0;
@@ -7090,61 +7761,56 @@ void generate_intersect_check_lists(struct pointer_to_1d_int_list **overlap_list
               add_to_mask_intersect_list(&Volumes[volume_index]->geometry.mask_intersect_list,overlap_lists[volume_index]->elements[overlap_index]);
             }
           }
-            
-            
+
+
           } else if (mask_mode == 2) {
           // When in ANY mode, the problem is easier, as not all masks have to overlap the volume, and we can add each one to the list
             for (iterate=0;iterate<Volumes[overlap_lists[volume_index]->elements[overlap_index]]->geometry.masked_by_list.num_elements;iterate++) {
               mask_index = Volumes[overlap_lists[volume_index]->elements[overlap_index]]->geometry.masked_by_list.elements[iterate];
-            
+
               if (on_int_list(*overlap_lists[volume_index],mask_index) == 1) {
                 //add_to_mask_intersect_lists(&Volumes[volume_index]->geometry.mask_intersect_lists,mask_index,overlap_lists[volume_index]->elements[overlap_index]);
                 // Adding the masked intersect list elements to another list
                 add_to_mask_intersect_list(&Volumes[volume_index]->geometry.mask_intersect_list,overlap_lists[volume_index]->elements[overlap_index]);
               }
             }
-            
+
           }
         }
       }
-      
-      
+
+
       Volumes[volume_index]->geometry.intersect_check_list.num_elements = sum_int_list(logic_list);
       Volumes[volume_index]->geometry.intersect_check_list.elements = malloc(Volumes[volume_index]->geometry.intersect_check_list.num_elements * sizeof(int));
-      
+      if (!Volumes[volume_index]->geometry.intersect_check_list.elements) {
+	fprintf(stderr,"Failure allocating list in Union function generate_overlap_lists 12 - Exit!\n");
+	exit(EXIT_FAILURE);
+      }
+	
       iterate = 0;
       for (overlap_index = 0;overlap_index < overlap_lists[volume_index]->num_elements;overlap_index++) {
             if (logic_list.elements[overlap_index])   Volumes[volume_index]->geometry.intersect_check_list.elements[iterate++] = overlap_lists[volume_index]->elements[overlap_index];
       }
       free(logic_list.elements); // Need to be careful with names for variables to be freed, as they can collide with names in main because of automatic declaration of external variables
       free(mask_logic_list.elements);
-      
-      
+
+
       char string_output[128];
       MPI_MASTER(
       if (verbal) sprintf(string_output,"Intersect check list for Volume %d",volume_index);
       if (verbal) print_1d_int_list(Volumes[volume_index]->geometry.intersect_check_list,string_output);
       if (verbal) sprintf(string_output,"Mask intersect check list for Volume %d",volume_index);
-      if (verbal) print_1d_int_list(Volumes[volume_index]->geometry.mask_intersect_list,string_output);
-      /*
-      if (verbal) {
-        for (mask_index=0;mask_index<Volumes[volume_index]->geometry.mask_intersect_lists.number_of_lists;mask_index++) {
-          sprintf(string_output," - mask intersect check list for mask %d which is volume %d",mask_index,Volumes[volume_index]->geometry.mask_intersect_lists.mask_indices.elements[mask_index]);
-          print_1d_int_list(Volumes[volume_index]->geometry.mask_intersect_lists.lists[mask_index],string_output);
-        }
-      }
-      */
-      
-      )
+      if (verbal) print_1d_int_list(Volumes[volume_index]->geometry.mask_intersect_list,string_output)
+      );
   }
 };
 
 void generate_parents_lists(struct pointer_to_1d_int_list **parents_lists, struct Volume_struct **Volumes, int number_of_volumes, int verbal, int mask_mode) {
   // Function for generating parent lists for all volumes
   // A volume m has n as a parent, if volume n has volume m as a child
-  
+
   // if mask_mode == 0, masks are ignored, if mask_mode == 1, masks are taken into account.
-  
+
   MPI_MASTER(
   if (verbal) {
     if (mask_mode == 1)
@@ -7153,30 +7819,37 @@ void generate_parents_lists(struct pointer_to_1d_int_list **parents_lists, struc
         printf("\nGenerating parents lists (ignoring masks) ----------- \n");
     else {
         printf("Error, the function parents_lists got a non defined mask_mode");
-        exit(1);
+        exit(EXIT_FAILURE);
     }
   }
-  
+
   )
   // Volume iterate has volume p as a parent, if volume p has volume iterate as child.
-  
+
   struct pointer_to_1d_int_list temp_list_local;
   temp_list_local.num_elements = number_of_volumes;
   temp_list_local.elements = malloc(number_of_volumes*sizeof(int));
-  
+  if (!temp_list_local.elements) {
+    fprintf(stderr,"Failure allocating list in Union function generate_parents_lists 1 - Exit!\n");
+    exit(EXIT_FAILURE);
+  }
   // Loop over
   int iterate,parent,used_elements;
   for (iterate = 0;iterate < number_of_volumes;iterate++) {
     // clear temp list
     used_elements = 0;
     parents_lists[iterate] = malloc(sizeof(struct pointer_to_1d_int_list));
+    if (!parents_lists[iterate]) {
+      fprintf(stderr,"Failure allocating list in Union function generate_parents_lists 2 - Exit!\n");
+      exit(EXIT_FAILURE);
+    }
     for (parent = 0;parent < number_of_volumes;parent++) {
         if (on_int_list(Volumes[parent]->geometry.children,iterate))
           if (mask_mode == 1 || (Volumes[parent]->geometry.is_mask_volume == 0 && Volumes[iterate]->geometry.is_mask_volume == 0))
             temp_list_local.elements[used_elements++] = parent;
     }
       allocate_list_from_temp(used_elements,temp_list_local,parents_lists[iterate]);
-      
+
       char string_output[128];
       MPI_MASTER(
       if (verbal) sprintf(string_output,"Parents for Volume %d",iterate);
@@ -7190,9 +7863,9 @@ void generate_parents_lists(struct pointer_to_1d_int_list **parents_lists, struc
 void generate_true_parents_lists(struct pointer_to_1d_int_list **parents_lists, struct pointer_to_1d_int_list **true_children_lists, struct Volume_struct **Volumes, int number_of_volumes, int verbal, int mask_mode) {
   // Function for generating parent lists for all volumes
   // A volume m has n as a parent, if volume n has volume m as a child
-  
+
   // if mask_mode == 0, masks are ignored, if mask_mode == 1, masks are taken into account.
-  
+
   MPI_MASTER(
   if (verbal) {
     if (mask_mode == 1)
@@ -7201,16 +7874,20 @@ void generate_true_parents_lists(struct pointer_to_1d_int_list **parents_lists, 
         printf("\nGenerating parents lists (ignoring masks) ----------- \n");
     else {
         printf("Error, the function parents_lists got a non defined mask_mode");
-        exit(1);
+        exit(EXIT_FAILURE);
     }
   }
-  
+
   )
   // Volume iterate has volume p as a parent, if volume p has volume iterate as child.
-  
+
   struct pointer_to_1d_int_list temp_list_local;
   temp_list_local.num_elements = number_of_volumes;
   temp_list_local.elements = malloc(number_of_volumes*sizeof(int));
+  if (!temp_list_local.elements) {
+    fprintf(stderr,"Failure allocating list in Union function generate_true_parents_lists 1 - Exit!\n");
+    exit(EXIT_FAILURE);
+  }
   
   // Loop over
   int iterate,parent,used_elements;
@@ -7218,6 +7895,10 @@ void generate_true_parents_lists(struct pointer_to_1d_int_list **parents_lists, 
     // clear temp list
     used_elements = 0;
     parents_lists[iterate] = malloc(sizeof(struct pointer_to_1d_int_list)); // allocate_list_from_temp allocates
+    if (!parents_lists[iterate]) {
+      fprintf(stderr,"Failure allocating list in Union function generate_true_parents_lists 2 - Exit!\n");
+      exit(EXIT_FAILURE);
+    }
     for (parent = 0;parent < number_of_volumes;parent++) {
         //if (on_int_list(Volumes[parent]->geometry.children,iterate))
         if (on_int_list(*true_children_lists[parent],iterate))
@@ -7225,7 +7906,7 @@ void generate_true_parents_lists(struct pointer_to_1d_int_list **parents_lists, 
             temp_list_local.elements[used_elements++] = parent;
     }
       allocate_list_from_temp(used_elements,temp_list_local,parents_lists[iterate]);
-      
+
       char string_output[128];
       MPI_MASTER(
       if (verbal) sprintf(string_output,"Parents for Volume %d",iterate);
@@ -7242,17 +7923,17 @@ void generate_intersect_check_lists_experimental(struct pointer_to_1d_int_list *
   Description of needed lists for volume n:
   Children list: List of volumes that is contained within volume n (is stored in the Volumes struct)
   True Children list: List of volumes that when masked by their masks is contained within volume n when masked by it's masks
-  
+
   Parents list: List of volumes that contains volume n
   True parents list: List of volumes that when masked by their masks contains volume n when it is masked by it's masks
-  
+
   raw overlap list: List of volumes whos geometry overlaps the geometry of volume n
   true overlap list: List of volumes whos geometry overlaps the geometry of volume n when the masks of both volumes are applied
-  
-  
-  
+
+
+
   The algorithm:
-  
+
   1) Take the true overlap list for volume n
   2) remove parents of n (normal parent list, with masks)
   3) remove volumes that do not mask n and are true parents of n
@@ -7260,67 +7941,70 @@ void generate_intersect_check_lists_experimental(struct pointer_to_1d_int_list *
   5) remove volumes that have at least one true parent on the list (in step 4) that is not a mask volume
   6) split the list into two, the intersect_check_list which is all non masked volumes still on the list, and the mask_intersect_list which is the masked volumes
   7) remove volumes on the mask_intersect_list whos mask does not overlap (standard overlap list) n
-  
+
   In step 5 the order in which the volumes are tested and removed may matter, so it is specifically stated that it is as the list looked in step 4.
   */
-  
+
   MPI_MASTER(
   if (verbal) printf("\nGenerating intersect check lists -------------------- \n");
   )
-  
+
   struct pointer_to_1d_int_list work_list;
   struct pointer_to_1d_int_list logic_list;
-  
+
   int volume_index,iterate,parent,mask_index,masked_volume_index,ANY_logic,true_parent_volume_number;
   int *mask_check,*mask_start;
   for (volume_index = 0;volume_index < number_of_volumes;volume_index++) {
-    
+
     // 1) Take the true overlap list for volume n
     // Create copy of true_overlap_lists to work with
-    
+
     if (Volumes[volume_index]->geometry.is_mask_volume == 1) {
       // Bug fixed on 26/11/2016, do not create intersection lists for masks as they are not used, and affects destinations lists in a problematic way
       Volumes[volume_index]->geometry.intersect_check_list.num_elements = 0;
       Volumes[volume_index]->geometry.mask_intersect_list.num_elements = 0;
-      
+
     } else {
       work_list.num_elements = true_overlap_lists[volume_index]->num_elements;
       work_list.elements = malloc(work_list.num_elements * sizeof(int));
+      if (!work_list.elements) {
+	fprintf(stderr,"Failure allocating list in Union function generate_intersect_check_lists_experimental 1 - Exit!\n");
+	exit(EXIT_FAILURE);
+      }
       for (iterate=0;iterate<work_list.num_elements;iterate++) work_list.elements[iterate] = true_overlap_lists[volume_index]->elements[iterate];
-    
-    //if (verbal) print_1d_int_list(work_list,"After 1)");
-    
-    
+
     //2) remove parents of n (normal parent list, with masks)
     for (iterate=work_list.num_elements-1;iterate>-1;iterate--) {
       if (on_int_list(*parents_lists[volume_index],work_list.elements[iterate]))
         remove_element_in_list_by_index(&work_list,iterate);
     }
-    
+
     //if (verbal) print_1d_int_list(work_list,"After 2)");
-    
+
     //3) remove volumes that do not mask n and are true parents of n
     for (iterate=work_list.num_elements-1;iterate>-1;iterate--) {
       if (on_int_list(Volumes[volume_index]->geometry.masked_by_list,work_list.elements[iterate]) == 0 && on_int_list(*true_parents_lists[volume_index],work_list.elements[iterate]))
         remove_element_in_list_by_index(&work_list,iterate);
     }
-    
+
     //if (verbal) print_1d_int_list(work_list,"After 3)");
-    
+
     //4) remove volumes that are not masks and have lower priority than n
     for (iterate=work_list.num_elements-1;iterate>-1;iterate--) {
       if (Volumes[work_list.elements[iterate]]->geometry.is_mask_volume == 0 && Volumes[work_list.elements[iterate]]->geometry.priority_value < Volumes[volume_index]->geometry.priority_value)
         remove_element_in_list_by_index(&work_list,iterate);
     }
-    
-    //if (verbal) print_1d_int_list(work_list,"After 4)");
-    
+
     //5) remove volumes that have at least one true parent on the list (in step 4) that is not a mask volume
     // Here a logic_list is used to not have the order of removal matter
     logic_list.num_elements = work_list.num_elements;
     logic_list.elements = malloc(logic_list.num_elements * sizeof(int));
+    if (!logic_list.elements) {
+      fprintf(stderr,"Failure allocating list in Union function generate_intersect_check_lists_experimental 2 - Exit!\n");
+      exit(EXIT_FAILURE);
+    }
     for(iterate=0;iterate<logic_list.num_elements;iterate++) logic_list.elements[iterate] = 1;
-    
+
     for (iterate=0;iterate<work_list.num_elements;iterate++) {
       for (parent=0;parent<true_parents_lists[work_list.elements[iterate]]->num_elements;parent++) {
         true_parent_volume_number = true_parents_lists[work_list.elements[iterate]]->elements[parent];
@@ -7331,20 +8015,18 @@ void generate_intersect_check_lists_experimental(struct pointer_to_1d_int_list *
         }
       }
     }
-    
+
     // Now the elements marked for removal can be removed without interfering in the operation
     for (iterate=work_list.num_elements-1;iterate>-1;iterate--) {
       if (logic_list.elements[iterate] == 0) remove_element_in_list_by_index(&work_list,iterate);
     }
     free(logic_list.elements);
-    
-    //if (verbal) print_1d_int_list(work_list,"After 5)");
-      
+
     //6) split the list into two, the intersect_check_list which is all non masked volumes still on the list, and the mask_intersect_list which is the masked volumes
-    
+
     Volumes[volume_index]->geometry.intersect_check_list.num_elements = 0;
     Volumes[volume_index]->geometry.mask_intersect_list.num_elements = 0;
-    
+
     for (iterate=0;iterate<work_list.num_elements;iterate++) {
       if (Volumes[work_list.elements[iterate]]->geometry.is_masked_volume == 1) {
         add_element_to_int_list(&Volumes[volume_index]->geometry.mask_intersect_list,work_list.elements[iterate]);
@@ -7352,15 +8034,12 @@ void generate_intersect_check_lists_experimental(struct pointer_to_1d_int_list *
         add_element_to_int_list(&Volumes[volume_index]->geometry.intersect_check_list,work_list.elements[iterate]);
       }
     }
-    
-    //if (verbal) print_1d_int_list(Volumes[volume_index]->geometry.intersect_check_list,"After 6) intersect_check_list");
-    //if (verbal) print_1d_int_list(Volumes[volume_index]->geometry.mask_intersect_list,"After 6) mask_intersect_list");
-    
+
     //7) remove volumes on the mask_intersect_list whos masks does not overlap (standard overlap list) n
     for (iterate=Volumes[volume_index]->geometry.mask_intersect_list.num_elements-1;iterate>-1;iterate--) {
       // Need to check if the volumes masking Volumes[volume_index]->geometry.mask_intersect_list.elements[iterate] overlaps with n
       masked_volume_index = Volumes[volume_index]->geometry.mask_intersect_list.elements[iterate];
-      
+
       if (Volumes[masked_volume_index]->geometry.mask_mode == 1) {// All mode, if just one does not overlap, remove the element
         for (mask_start=mask_check=Volumes[masked_volume_index]->geometry.masked_by_list.elements;mask_check-mask_start<Volumes[masked_volume_index]->geometry.masked_by_list.num_elements;mask_check++) {
           if (on_int_list(*raw_overlap_lists[volume_index],*mask_check) == 0) {
@@ -7379,13 +8058,10 @@ void generate_intersect_check_lists_experimental(struct pointer_to_1d_int_list *
         if (ANY_logic == 0) remove_element_in_list_by_index(&Volumes[volume_index]->geometry.mask_intersect_list,iterate);
       }
     }
-    
+
     if (work_list.num_elements > 0) free(work_list.elements);
     }
-    
-    
-    //if (verbal) print_1d_int_list(Volumes[volume_index]->geometry.mask_intersect_list,"After 7) mask_intersect_list");
-    
+
     char string_output[128];
     MPI_MASTER(
     if (verbal) sprintf(string_output,"Intersect check list for Volume %d",volume_index);
@@ -7393,8 +8069,6 @@ void generate_intersect_check_lists_experimental(struct pointer_to_1d_int_list *
     if (verbal) sprintf(string_output,"Mask intersect check list for Volume %d",volume_index);
     if (verbal) print_1d_int_list(Volumes[volume_index]->geometry.mask_intersect_list,string_output);
     )
-    
-    
   }
 }
 
@@ -7403,7 +8077,7 @@ void generate_grandparents_lists(struct pointer_to_1d_int_list **grandparents_li
   // Volume iterate has volume p as a grandparent, if volume p has a parent T, who has volume iterate as parent.
   // Alternertively:
   // Volume iterate has volume p as a grandparent, if volume p have a child that is volume iterate's parent.
-  
+
   MPI_MASTER(
   if (verbal) printf("\nGenerating grandparents lists ----------------------- \n");
   )
@@ -7411,11 +8085,18 @@ void generate_grandparents_lists(struct pointer_to_1d_int_list **grandparents_li
   struct pointer_to_1d_int_list common;
   common.num_elements = number_of_volumes;
   common.elements = malloc(common.num_elements*sizeof(int)); // Maximum needed space.
-  
+  if (!common.elements) {
+    fprintf(stderr,"Failure allocating list in Union function generate_grandparents_lists 1 - Exit!\n");
+    exit(EXIT_FAILURE);
+  }
   struct pointer_to_1d_int_list temp_list_local;
   temp_list_local.num_elements = number_of_volumes;
   temp_list_local.elements = malloc(number_of_volumes*sizeof(int));
-  
+  if (!temp_list_local.elements) {
+    fprintf(stderr,"Failure allocating list in Union function generate_grandparents_lists 2 - Exit!\n");
+    exit(EXIT_FAILURE);
+  }
+
   int iterate,reset_int,parent,child,used_elements;
   for (iterate = 0;iterate < number_of_volumes;iterate++) {
     // clear temp list
@@ -7425,7 +8106,11 @@ void generate_grandparents_lists(struct pointer_to_1d_int_list **grandparents_li
     for (reset_int=0; reset_int<number_of_volumes; reset_int++) temp_list_local.elements[reset_int] = -1; // Initialize to impossible volume ids
 
     grandparents_lists[iterate] = malloc(sizeof(struct pointer_to_1d_int_list));
-    
+    if (!grandparents_lists[iterate]) {
+      fprintf(stderr,"Failure allocating list in Union function generate_grandparents_lists 3 - Exit!\n");
+      exit(EXIT_FAILURE);
+    }
+
     for (parent = 0; parent<parents_lists[iterate]->num_elements; parent++) {
         // parent number p parents_lists[iterate].elements.[p] in the parent_list for iterate.
         on_both_int_lists(parents_lists[parents_lists[iterate]->elements[parent]], parents_lists[iterate], &common);
@@ -7438,7 +8123,7 @@ void generate_grandparents_lists(struct pointer_to_1d_int_list **grandparents_li
         }
     }
     allocate_list_from_temp(used_elements, temp_list_local, grandparents_lists[iterate]);
-  
+
     char string_output[128];
     MPI_MASTER(
       if (verbal) sprintf(string_output,"Grandparents for Volume %d", iterate);
@@ -7462,25 +8147,26 @@ void generate_destinations_lists_experimental(struct pointer_to_1d_int_list **tr
 
   struct pointer_to_1d_int_list work_list;
   int volume_index,iterate,iterate2,found_index,I_index,I_volume;
-  
+
   for (volume_index=1;volume_index<number_of_volumes;volume_index++) {
-    
+
     // 1) Take the true overlap list for volume n
     // Create copy of true_overlap_lists to work with
     work_list.num_elements = true_overlap_lists[volume_index]->num_elements;
     work_list.elements = malloc(work_list.num_elements * sizeof(int));
+    if (!work_list.elements) {
+      fprintf(stderr,"Failure allocating list in Union function generate_destinations_lists_experimental 1 - Exit!\n");
+      exit(EXIT_FAILURE);
+    }
     for (iterate=0;iterate<work_list.num_elements;iterate++) work_list.elements[iterate] = true_overlap_lists[volume_index]->elements[iterate];
-    
-    //if (verbal) print_1d_int_list(work_list,"After 1)");
-    
+
+
     // 2) Remove elements from n's intersection list
     for (iterate=work_list.num_elements-1;iterate>-1;iterate--) {
       if (on_int_list(Volumes[volume_index]->geometry.intersect_check_list,work_list.elements[iterate]))
         remove_element_in_list_by_index(&work_list,iterate);
     }
-    
-    //if (verbal) print_1d_int_list(work_list,"After 2)");
-  
+
     // 3) Remove true children of non-mask elements on n's intersection list
     for (I_index=0;I_index<Volumes[volume_index]->geometry.intersect_check_list.num_elements;I_index++) {
       I_volume = Volumes[volume_index]->geometry.intersect_check_list.elements[I_index];
@@ -7490,17 +8176,13 @@ void generate_destinations_lists_experimental(struct pointer_to_1d_int_list **tr
         }
       }
     }
-    
-    //if (verbal) print_1d_int_list(work_list,"After 3)");
-    
+
     // 4) Remove elements from mask intersection list
     for (iterate=work_list.num_elements-1;iterate>-1;iterate--) {
       if (on_int_list(Volumes[volume_index]->geometry.mask_intersect_list,work_list.elements[iterate]))
         remove_element_in_list_by_index(&work_list,iterate);
     }
-    
-    //if (verbal) print_1d_int_list(work_list,"After 4)");
-    
+
     // 5) Remove true children of elements on n's mask intersection list
     for (I_index=0;I_index<Volumes[volume_index]->geometry.mask_intersect_list.num_elements;I_index++) {
       I_volume = Volumes[volume_index]->geometry.mask_intersect_list.elements[I_index];
@@ -7510,29 +8192,21 @@ void generate_destinations_lists_experimental(struct pointer_to_1d_int_list **tr
         }
       }
     }
-    
-    //if (verbal) print_1d_int_list(work_list,"After 5)");
-    
+
     // 6) Remove true children of n
     for (iterate=0;iterate<true_children_lists[volume_index]->num_elements;iterate++)
       remove_element_in_list_by_value(&work_list,true_children_lists[volume_index]->elements[iterate]);
-      
-    //if (verbal) print_1d_int_list(work_list,"After 6)");
-      
+
     // 7) Remove true grandparents of n
     for (iterate=0;iterate<true_grandparents_lists[volume_index]->num_elements;iterate++)
       remove_element_in_list_by_value(&work_list,true_grandparents_lists[volume_index]->elements[iterate]);
-      
-    //if (verbal) print_1d_int_list(work_list,"After 7)");
-      
+
     // 8) Remove mask volumes
     for (iterate=work_list.num_elements-1;iterate>-1;iterate--) {
       if (Volumes[work_list.elements[iterate]]->geometry.is_mask_volume == 1)
         remove_element_in_list_by_index(&work_list,iterate);
     }
-    
-    //if (verbal) print_1d_int_list(work_list,"After 8)");
-    
+
     // 9) Remove true parents of n on the list that has other true parents of n on the list with higher priority
     for (iterate=work_list.num_elements-1;iterate>-1;iterate--) {
       if (on_int_list(*true_parents_lists[volume_index],work_list.elements[iterate])){
@@ -7548,20 +8222,21 @@ void generate_destinations_lists_experimental(struct pointer_to_1d_int_list **tr
         }
       }
     }
-    
-    //if (verbal) print_1d_int_list(work_list,"After 9)");
-    
+
     // 10) The remaining list is the destinations_list
     Volumes[volume_index]->geometry.destinations_list.num_elements = work_list.num_elements;
     Volumes[volume_index]->geometry.destinations_list.elements = malloc(Volumes[volume_index]->geometry.destinations_list.num_elements*sizeof(int));
+    if (!Volumes[volume_index]->geometry.destinations_list.elements) {
+      fprintf(stderr,"Failure allocating list in Union function generate_destinations_lists_experimental 2 - Exit!\n");
+      exit(EXIT_FAILURE);
+    }
     
     for (iterate=0;iterate<work_list.num_elements;iterate++)
       Volumes[volume_index]->geometry.destinations_list.elements[iterate] = work_list.elements[iterate];
-    
+
     // Clean up after work_list so the next can be allocated
     free(work_list.elements);
-  
-  
+
     char string_output[128];
     MPI_MASTER(
     if (verbal) sprintf(string_output,"Destinations list for Volume %d",volume_index);
@@ -7576,10 +8251,10 @@ void generate_destinations_list(int N_volume,struct Volume_struct **Volumes,stru
     // This function generates the destinations_list for a single volume index, N_volume
     // The destination list describes which volumes a ray can enter when leaving N_volume
     // Each of the 6 steps for the algorithm is commented individually, and debug print statements are available
-    
+
     // Mask update: Mask volumes are to be removed from all destinations_list as they can not be the current volume
     // It is not that simple, as some volume will then get empty destination lists. Need to revise this algorithm.
-    
+
     // 1) Start with the overlap list of volume N
     // 2) remove all Volumes from the overlap list of N, which is also on the intersect_check_list
     // 3) remove the children of volumes removed in step 2)
@@ -7587,11 +8262,11 @@ void generate_destinations_list(int N_volume,struct Volume_struct **Volumes,stru
     // 5) remove the grandparents of N
     // 6) remove volumes with lower priority than parents of N still on the list
     // 7) The remaing list is the destinations list
-    
-    
+
+
     // The destination list system should run without masks altogether, meaning parent and grandparent lists should not use them,
     //  and all masks should be removed in step 2
-    
+
     // 1) Start with the overlap list of volume N
     // 2) remove all masks on the list
     // 3) remove all Volumes from the overlap list of N, which is also on the intersect_check_list
@@ -7600,32 +8275,40 @@ void generate_destinations_list(int N_volume,struct Volume_struct **Volumes,stru
     // 6) remove the grandparents of N
     // 7) remove volumes with lower priority than parents of N still on the list
     // 8) The remaing list is the destinations list
-    
-    
+
+
 
     // 1) Start with the overlap list of volume N
     struct pointer_to_1d_int_list overlap_list;
     overlap_list.num_elements = original_overlap_list.num_elements;
     overlap_list.elements = malloc(overlap_list.num_elements*sizeof(int));
+    if (!overlap_list.elements) {
+      fprintf(stderr,"Failure allocating list in Union function generate_destinations_lists 1 - Exit!\n");
+      exit(EXIT_FAILURE);
+    }
     int iterate;
     for (iterate=0;iterate<overlap_list.num_elements;iterate++) overlap_list.elements[iterate] = original_overlap_list.elements[iterate];
-    
+
     char string_output[124];
     // sprintf(string_output,"Destinations list for Volume %d step 1",N_volume);
     // print_1d_int_list(overlap_list,string_output);
-    
+
     // 2) remove all masks
     for (iterate=overlap_list.num_elements-1;iterate > -1;iterate--) {
         if (Volumes[overlap_list.elements[iterate]]->geometry.is_mask_volume == 1) {
             remove_element_in_list_by_index(&overlap_list,iterate);
         }
     }
-    
+
     // 3) remove all Volumes from the overlap list of N, which is also on the intersect_check_list
     struct pointer_to_1d_int_list removed_under_2;
     removed_under_2.num_elements = 0;
     int to_check;
     removed_under_2.elements = malloc( Volumes[N_volume]->geometry.intersect_check_list.num_elements * sizeof(int));
+    if (!removed_under_2.elements) {
+      fprintf(stderr,"Failure allocating list in Union function generate_destinations_lists 2 - Exit!\n");
+      exit(EXIT_FAILURE);
+    }
     for (iterate=0;iterate < Volumes[N_volume]->geometry.intersect_check_list.num_elements;iterate++) {
         to_check = Volumes[N_volume]->geometry.intersect_check_list.elements[iterate];
         if (on_int_list(overlap_list,to_check)) {
@@ -7633,10 +8316,10 @@ void generate_destinations_list(int N_volume,struct Volume_struct **Volumes,stru
             remove_element_in_list_by_value(&overlap_list,to_check);
         }
     }
-    
+
     // sprintf(string_output,"Destinations list for Volume %d step 2",N_volume);
     // print_1d_int_list(overlap_list,string_output);
-    
+
     // 4) remove the children of volumes removed in step 2)
     int children;
     for (iterate=0;iterate<removed_under_2.num_elements;iterate++){
@@ -7644,33 +8327,40 @@ void generate_destinations_list(int N_volume,struct Volume_struct **Volumes,stru
           remove_element_in_list_by_value(&overlap_list,Volumes[removed_under_2.elements[iterate]]->geometry.children.elements[children]);
         }
     }
-    
+
     // sprintf(string_output,"Destinations list for Volume %d step 3",N_volume);
     // print_1d_int_list(overlap_list,string_output);
-    
+
     // 5) remove the children of N
     for (children = 0;children < Volumes[N_volume]->geometry.children.num_elements;children++) {
         remove_element_in_list_by_value(&overlap_list,Volumes[N_volume]->geometry.children.elements[children]);
     }
-    
+
     // sprintf(string_output,"Destinations list for Volume %d step 4",N_volume);
     // print_1d_int_list(overlap_list,string_output);
-    
+
     // 6) remove the grandparents of N
     int grandparent;
     for (grandparent = 0;grandparent < grandparent_list->num_elements;grandparent++) {
         remove_element_in_list_by_value(&overlap_list,grandparent_list->elements[grandparent]);
     }
-    
+
     // sprintf(string_output,"Destinations list for Volume %d step 5",N_volume);
     // print_1d_int_list(overlap_list,string_output);
-    
+
     // 7) remove volumes with lower priority than parents of N still on the list
     struct pointer_to_1d_int_list logic_list;
     logic_list.num_elements = overlap_list.num_elements;
-    if (logic_list.num_elements>0) logic_list.elements = malloc(logic_list.num_elements*sizeof(int));
+    logic_list.elements=NULL;
+    if (logic_list.num_elements>0) {
+      logic_list.elements = malloc(logic_list.num_elements*sizeof(int));
+    }
+    if (!logic_list.elements) {
+      fprintf(stderr,"Failure allocating list in Union function generate_destinations_lists 3 - Exit!\n");
+      exit(EXIT_FAILURE);
+    }
     for (iterate=0;iterate<logic_list.num_elements;iterate++) logic_list.elements[iterate] = 1;
-    
+
     int parent;
     for (parent=0;parent<parent_list->num_elements;parent++) {
       if (on_int_list(overlap_list,parent_list->elements[parent])) {
@@ -7683,36 +8373,26 @@ void generate_destinations_list(int N_volume,struct Volume_struct **Volumes,stru
         }
       }
     }
-    
+
     // 8) The remaing list is the destinations list
     Volumes[N_volume]->geometry.destinations_list.num_elements = sum_int_list(logic_list);
     Volumes[N_volume]->geometry.destinations_list.elements = malloc(Volumes[N_volume]->geometry.destinations_list.num_elements * sizeof(int));
+    if (!Volumes[N_volume]->geometry.destinations_list.elements) {
+      fprintf(stderr,"Failure allocating list in Union function generate_destinations_lists 4 - Exit!\n");
+      exit(EXIT_FAILURE);
+    }
     
     int overlap_index,used_elements=0;
     for (overlap_index=0;overlap_index < overlap_list.num_elements;overlap_index++)
       if (logic_list.elements[overlap_index] == 1)
         Volumes[N_volume]->geometry.destinations_list.elements[used_elements++] = overlap_list.elements[overlap_index];
-    
+
     if (overlap_list.num_elements>0) free(overlap_list.elements);
     if (logic_list.num_elements>0) free(logic_list.elements);
-    
-    
-    /*
-    // Old version before rule 6 and 2 was added
-    // 8) The remaing list is the destinations list
-    Volumes[N_volume]->geometry.destinations_list.num_elements = overlap_list.num_elements;
-    Volumes[N_volume]->geometry.destinations_list.elements = malloc(Volumes[N_volume]->geometry.destinations_list.num_elements * sizeof(int));
-    
-    int overlap_index;
-    for (overlap_index=0;overlap_index < overlap_list.num_elements;overlap_index++)
-        Volumes[N_volume]->geometry.destinations_list.elements[overlap_index] = overlap_list.elements[overlap_index];
-    
-    // sprintf(string_output,"Destination list for Volume %d step 6",N_volume);
-    // print_1d_int_list(Volumes[N_volume]->geometry.destinations_list,string_output);
-    
-    if (overlap_list.num_elements>0) free(overlap_list.elements);
-    */
-    
+
+    // Clean up memory
+    free(removed_under_2.elements);
+
     };
 
 void generate_destinations_lists(struct pointer_to_1d_int_list **grandparents_lists, struct pointer_to_1d_int_list **parents_lists, struct pointer_to_1d_int_list **overlap_lists,struct Volume_struct **Volumes, int number_of_volumes, int verbal) {
@@ -7721,11 +8401,11 @@ void generate_destinations_lists(struct pointer_to_1d_int_list **grandparents_li
     MPI_MASTER(
     if (verbal) printf("\nGenerating destinations lists ----------------------- \n");
     )
-    
+
     int volume_index;
     for (volume_index = 0;volume_index < number_of_volumes;volume_index++) {
       generate_destinations_list(volume_index,Volumes,*overlap_lists[volume_index],parents_lists[volume_index],grandparents_lists[volume_index]);
-      
+
       char string_output[128];
       if (verbal) sprintf(string_output,"Destinations list for Volume %d",volume_index);
       MPI_MASTER(
@@ -7734,48 +8414,31 @@ void generate_destinations_lists(struct pointer_to_1d_int_list **grandparents_li
     }
 };
 
-/* OBSOLETE
-void generate_destinations_logic_lists(struct Volume_struct **Volumes,int number_of_volumes,int verbal) {
-  // The destinations logic list is another way to store the destinations list that makes some tasks quicker
-  
-  MPI_MASTER(
-  if (verbal) printf("\nGenerating destinations logic lists ----------------------- \n");
-  )
-
-  int volume_index;
-  for (volume_index = 0;volume_index < number_of_volumes;volume_index++) {
-      allocate_logic_list_from_temp(number_of_volumes,Volumes[volume_index]->geometry.destinations_list,&Volumes[volume_index]->geometry.destinations_logic_list);
-      
-      char string_output[128];
-      MPI_MASTER(
-      if (verbal) sprintf(string_output,"Destinations logic list for Volume %d",volume_index);
-      if (verbal) print_1d_int_list(Volumes[volume_index]->geometry.destinations_logic_list,string_output);
-      )
-  }
-
-};
-*/
 
 void generate_reduced_destinations_lists(struct pointer_to_1d_int_list **parents_lists, struct Volume_struct **Volumes,int number_of_volumes,int verbal) {
     // The reduced destination list is the destination list of a volume, where each element that has a parent on the same destination list is removed
     // This list is to be fed to the which_volume function, as this funtion will automatically search through the direct children in a tree like manner
     // The optimization reduces the number of calculations of within functions in nested geometries.
-    
+
     MPI_MASTER(
     if (verbal) printf("\nGenerating reduced destination lists ----------------------- \n");
     )
-    
+
     struct pointer_to_1d_int_list logic_list;
-  
+
     int volume_index,checked_dest_index,checked_dest_volume,rest_dest_index,rest_dest_volume,dest_index,iterate;
     for (volume_index = 0;volume_index < number_of_volumes;volume_index++) {
-      
+
       //printf("Generating reduced destinations lists for volume %d\n",volume_index);
       logic_list.num_elements = Volumes[volume_index]->geometry.destinations_list.num_elements;
       logic_list.elements = malloc( (int) logic_list.num_elements * sizeof(int));
-      //printf("Sucsessfully allocated space for %d integers in logic list %d\n",logic_list.num_elements,volume_index);
-      for (iterate=0;iterate<logic_list.num_elements;iterate++) logic_list.elements[iterate] = 1;
+      if (!logic_list.elements) {
+	fprintf(stderr,"Failure allocating list in Union function generate_reduced_destinations_lists 1 - Exit!\n");
+	exit(EXIT_FAILURE);
+      }
       
+      for (iterate=0;iterate<logic_list.num_elements;iterate++) logic_list.elements[iterate] = 1;
+
       for (checked_dest_index=0;checked_dest_index<Volumes[volume_index]->geometry.destinations_list.num_elements;checked_dest_index++) {
             checked_dest_volume = Volumes[volume_index]->geometry.destinations_list.elements[checked_dest_index];
             for (rest_dest_index=0;rest_dest_index<Volumes[volume_index]->geometry.destinations_list.num_elements;rest_dest_index++) {
@@ -7792,20 +8455,24 @@ void generate_reduced_destinations_lists(struct pointer_to_1d_int_list **parents
                 }
             }
       }
-      
+
       Volumes[volume_index]->geometry.reduced_destinations_list.num_elements = sum_int_list(logic_list);
       Volumes[volume_index]->geometry.reduced_destinations_list.elements = malloc((int)Volumes[volume_index]->geometry.reduced_destinations_list.num_elements * sizeof(int));
+      if (!Volumes[volume_index]->geometry.reduced_destinations_list.elements) {
+	fprintf(stderr,"Failure allocating list in Union function generate_reduced_destinations_lists 2 - Exit!\n");
+	exit(EXIT_FAILURE);
+      }
       
       iterate = 0;
       for (dest_index = 0;dest_index < Volumes[volume_index]->geometry.destinations_list.num_elements;dest_index++) {
             if (logic_list.elements[dest_index] == 1)   Volumes[volume_index]->geometry.reduced_destinations_list.elements[iterate++] = Volumes[volume_index]->geometry.destinations_list.elements[dest_index];
       }
-      
+
       free(logic_list.elements);
-      
+
       // Testing an optimization
       remove_element_in_list_by_value(&Volumes[volume_index]->geometry.reduced_destinations_list,0);
-      
+
       char string_output[128];
       MPI_MASTER(
       if (verbal) sprintf(string_output,"Reduced destinations list for Volume %d",volume_index);
@@ -7820,17 +8487,21 @@ void generate_direct_children_lists(struct pointer_to_1d_int_list **parents_list
   if (verbal) printf("\nGenerating direct children lists ----------------------- \n");
   )
   // A direct children of volume n is a volume that is a child of n, but no other child of n is its parent
-  
+
   // Mask update: Need to check that this step does not bug out when the mask system interferes with child/parent systems
-  
+
   struct pointer_to_1d_int_list logic_list;
   int volume_index,child,parent,iterate;
   for (volume_index = 0;volume_index < number_of_volumes;volume_index++) {
         // Temp elements is used, and its actual number of elements is edited even though the memory allocated is not changed. This is so that the list functions handles it correctly.
         // The free function will free all the allocated memory regardless of the value of the .num_elements structure field, it is just there for convinience.
-      
+
         logic_list.num_elements = Volumes[volume_index]->geometry.children.num_elements;
         logic_list.elements = malloc(logic_list.num_elements * sizeof(int));
+	if (!logic_list.elements) {
+	  fprintf(stderr,"Failure allocating list in Union function generate_direct_children_lists 1 - Exit!\n");
+	  exit(EXIT_FAILURE);
+	}
         for (iterate=0;iterate<logic_list.num_elements;iterate++) logic_list.elements[iterate] = 1;
       
         // Look through each child of volume n, and for each of those look through all the other children of n and search for one of them being a parent to the child
@@ -7841,9 +8512,13 @@ void generate_direct_children_lists(struct pointer_to_1d_int_list **parents_list
                     logic_list.elements[child] = 0;
             }
         }
-      
+
       Volumes[volume_index]->geometry.direct_children.num_elements = sum_int_list(logic_list);
       Volumes[volume_index]->geometry.direct_children.elements = malloc(Volumes[volume_index]->geometry.direct_children.num_elements*sizeof(int));
+      if (!Volumes[volume_index]->geometry.direct_children.elements) {
+	fprintf(stderr,"Failure allocating list in Union function generate_direct_children_lists 2 - Exit!\n");
+	exit(EXIT_FAILURE);
+      }
       
       iterate = 0;
       for (child = 0;child < Volumes[volume_index]->geometry.children.num_elements;child++) {
@@ -7851,7 +8526,7 @@ void generate_direct_children_lists(struct pointer_to_1d_int_list **parents_list
       }
       // Be careful with names in both main and a function, as they are automatically declared as external variables, which would then also free the main.
       free(logic_list.elements);
-      
+
       char string_output[128];
       MPI_MASTER(
       if (verbal) sprintf(string_output,"Children list for Volume        %d",volume_index);
@@ -7859,7 +8534,7 @@ void generate_direct_children_lists(struct pointer_to_1d_int_list **parents_list
       if (verbal) sprintf(string_output,"Direct_children list for Volume %d",volume_index);
       if (verbal) print_1d_int_list(Volumes[volume_index]->geometry.direct_children,string_output);
       )
-      
+
   }
 
 };
@@ -7870,21 +8545,23 @@ void generate_starting_logic_list(struct starting_lists_struct *starting_lists, 
     // Remove all volumes that are children of non-vacuum volumes
     // It is still possible to have a volume on this list that is surrounded by non-vacuum volumes, but it is hard to detect these situations,
     //  meaning that it is ultimately partly the users responsibility to not send neutrons directly into materials.
-    
+
     int volume_index,*start,*check;
-    
+
     struct pointer_to_1d_int_list temp_list_local;
     temp_list_local.num_elements = number_of_volumes;
     temp_list_local.elements = malloc(number_of_volumes*sizeof(int));
+    if (!temp_list_local.elements) {
+      fprintf(stderr,"Failure allocating list in Union function generate_starting_logic_list - Exit!\n");
+      exit(EXIT_FAILURE);
+    }
     
-    //if (verbal==1) printf("sucessfully allocated temp_list_local.elements, now to enter which volumes are vacuums as a logic list\n");
     temp_list_local.elements[0] = 1; // Volume 0 is a vacuum volume.
     for (volume_index = 1;volume_index < number_of_volumes;volume_index++) {
         if (Volumes[volume_index]->p_physics->is_vacuum == 1) temp_list_local.elements[volume_index] = 1;
         else temp_list_local.elements[volume_index] = 0;
     }
     // temp_list_local is now a logic list of all vacuum volumes
-    //if (verbal==1) printf("list of vacuum volumes done, now to remove the children of non-vcauum volumes\n");
     for (volume_index = 1;volume_index < number_of_volumes;volume_index++) { // All volumes ...
         if (temp_list_local.elements[volume_index] == 0) { // ... that are not vacuum ...
             for (start = check = Volumes[volume_index]->geometry.children.elements;check - start < Volumes[volume_index]->geometry.children.num_elements;check++) { // ... have all their children ...
@@ -7892,20 +8569,18 @@ void generate_starting_logic_list(struct starting_lists_struct *starting_lists, 
             }
         }
     }
-    //if (verbal==1) printf("sucessfully removed children of non-vacuum volumes, now allocate allowed_start_logic_list\n");
     allocate_list_from_temp(number_of_volumes,temp_list_local,&starting_lists->allowed_starting_volume_logic_list);
-    //if (verbal==1) printf("sucsessfully allocated allowed_start_logic_list, now freeing temp_list_local.elements. \n");
     
     free(temp_list_local.elements);
     //if (verbal==1) printf("sucessfully freed temp_list_local.elements, generate starting lists done\n");
-    
+
     char string_output[128];
     MPI_MASTER(
     if (verbal) sprintf(string_output,"Allowed starting volume logic list");
     if (verbal) print_1d_int_list(starting_lists->allowed_starting_volume_logic_list,string_output);
     )
-    
-    
+
+
 };
 
 void generate_reduced_starting_destinations_list(struct starting_lists_struct *starting_lists, struct pointer_to_1d_int_list **parents_lists, struct Volume_struct **Volumes,int number_of_volumes,int verbal) {
@@ -7916,21 +8591,27 @@ void generate_reduced_starting_destinations_list(struct starting_lists_struct *s
     //printf("Generating reduced destinations lists for volume %d\n",volume_index);
     logic_list.num_elements = number_of_volumes;
     logic_list.elements = malloc( (int) logic_list.num_elements * sizeof(int));
+    if (!logic_list.elements) {
+      fprintf(stderr,"Failure allocating list in Union function generate_reduced_starting_destinations_list 1 - Exit!\n");
+      exit(EXIT_FAILURE);
+    }
     int iterate;
     for (iterate=0;iterate<logic_list.num_elements;iterate++) logic_list.elements[iterate] = 0;
-    
-    
+
+
     for (iterate=1;iterate<number_of_volumes;iterate++)
       if (Volumes[iterate]->geometry.is_mask_volume == 0) logic_list.elements[iterate] = 1;
-      //else logic_list.elements[iterate] = 0;
     
     starting_lists->starting_destinations_list.num_elements = sum_int_list(logic_list);
     starting_lists->starting_destinations_list.elements = malloc(starting_lists->starting_destinations_list.num_elements*sizeof(int));
-    
+    if (!starting_lists->starting_destinations_list.elements) {
+      fprintf(stderr,"Failure allocating list in Union function generate_reduced_starting_destinations_list 2 - Exit!\n");
+      exit(EXIT_FAILURE);
+    }
     int used_elements=0;
     for (iterate=1;iterate<number_of_volumes;iterate++)
       if (logic_list.elements[iterate] == 1) starting_lists->starting_destinations_list.elements[used_elements++] = iterate;
-    
+
     MPI_MASTER(
     if (verbal) printf("\nGenerating start destinations list ------------------------------ \n");
     if (verbal) print_1d_int_list(starting_lists->starting_destinations_list,"Starting destinations list");
@@ -7939,30 +8620,21 @@ void generate_reduced_starting_destinations_list(struct starting_lists_struct *s
     // The reduced starting destination list is used when a ray enters the component in the search for which volume it starts in.
     // It facilitates the same optimization as the regular destination list.
     // The start logic list is also generated, as it is very simple and does not need a seperate function
-    
+
     // Mask update: Need to remove mask volumes from the reduced starting destination list
-    
+
     MPI_MASTER(
     if (verbal) printf("\nGenerating reduced start destination list ----------------------- \n");
     )
-    
+
     int checked_dest_index,checked_dest_volume,rest_dest_index,rest_dest_volume,dest_index;
-    
-    /* Old version before masks were introduced
-    struct pointer_to_1d_int_list starting_dest_list;
-    
-    starting_dest_list.num_elements = number_of_volumes - 1;
-    starting_dest_list.elements = malloc ( starting_dest_list.num_elements * sizeof(int));
-    for (iterate=0;iterate<number_of_volumes-1;iterate++) starting_dest_list.elements[iterate] = iterate + 1; // All volumes to be checked for starting
-    */
-    
+        
     logic_list.num_elements = starting_lists->starting_destinations_list.num_elements;
     free(logic_list.elements);
     logic_list.elements = malloc( (int) logic_list.num_elements * sizeof(int));
-    
-    //printf("Sucsessfully allocated space for %d integers in logic list %d\n",logic_list.num_elements,volume_index);
+
     for (iterate=0;iterate<logic_list.num_elements;iterate++) logic_list.elements[iterate] = 1;
-  
+
     for (checked_dest_index=0;checked_dest_index<starting_lists->starting_destinations_list.num_elements;checked_dest_index++) {
         checked_dest_volume = starting_lists->starting_destinations_list.elements[checked_dest_index];
         for (rest_dest_index=0;rest_dest_index<starting_lists->starting_destinations_list.num_elements;rest_dest_index++) {
@@ -7976,25 +8648,31 @@ void generate_reduced_starting_destinations_list(struct starting_lists_struct *s
             }
         }
   }
-  
+
   starting_lists->reduced_start_list.num_elements = sum_int_list(logic_list);
   starting_lists->reduced_start_list.elements = malloc((int)starting_lists->reduced_start_list.num_elements * sizeof(int));
-  
+  if (!starting_lists->reduced_start_list.elements) {
+    fprintf(stderr,"Failure allocating list in Union function generate_reduced_starting_destinations_list 3 - Exit!\n");
+    exit(EXIT_FAILURE);
+  }
   iterate = 0;
   for (dest_index = 0;dest_index < starting_lists->starting_destinations_list.num_elements;dest_index++) {
         if (logic_list.elements[dest_index] == 1) starting_lists->reduced_start_list.elements[iterate++] = starting_lists->starting_destinations_list.elements[dest_index];
   }
-  
+
   free(logic_list.elements);
-  //free(starting_dest_list.elements);
   
   MPI_MASTER(
   if (verbal) print_1d_int_list(starting_lists->reduced_start_list,"Reduced start destinations list");
   )
-    
+
   // Making the start_logic_list.
   starting_lists->start_logic_list.num_elements = number_of_volumes;
   starting_lists->start_logic_list.elements = malloc ( starting_lists->start_logic_list.num_elements * sizeof(int));
+  if (!starting_lists->start_logic_list.elements) {
+    fprintf(stderr,"Failure allocating list in Union function generate_reduced_starting_destinations_list 4 - Exit!\n");
+    exit(EXIT_FAILURE);
+  }
   starting_lists->start_logic_list.elements[0] = 0;
   for (iterate=1;iterate<number_of_volumes;iterate++) starting_lists->start_logic_list.elements[iterate] = 1; // All volumes to be checked for starting volume
   MPI_MASTER(
@@ -8007,7 +8685,7 @@ void generate_next_volume_list(struct Volume_struct **Volumes, int number_of_vol
     // Generate list of volumes that can be the next volume which the ray enters. It is used for tagging, not the simulation / propagation
 
     // Mask update: These lists should be done as if all mask statuses are on, meaning they include all possible next volumes (will include more input to this function)
-    
+
     // bug: next volume list is not complete and contains duplicates
 
     MPI_MASTER(
@@ -8017,15 +8695,15 @@ void generate_next_volume_list(struct Volume_struct **Volumes, int number_of_vol
     int volume_index,iterate,mask_index;
     struct pointer_to_1d_int_list full_intersection_list;
     full_intersection_list.num_elements=0;
-    
+
     for (volume_index=0;volume_index<number_of_volumes;volume_index++) {
         Volumes[volume_index]->geometry.next_volume_list.num_elements = 0;
         // Before mask update
         //merge_lists(&Volumes[volume_index]->geometry.next_volume_list, &Volumes[volume_index]->geometry.destinations_list, &Volumes[volume_index]->geometry.intersect_check_list);
-        
+
         merge_lists(&full_intersection_list, &Volumes[volume_index]->geometry.mask_intersect_list, &Volumes[volume_index]->geometry.intersect_check_list);
         merge_lists(&Volumes[volume_index]->geometry.next_volume_list,&Volumes[volume_index]->geometry.destinations_list,&full_intersection_list);
-        
+
         /* // This complication is taken into account by adding the mask_intersect list instead
         // It is possible that the next volume is still not on this list, as when masks are encountered the next volume can be a volume they mask.
         // For each on the list, add the volumes masked by that mask (do not iterate over this, as masks can not be masked regardless)
@@ -8037,16 +8715,16 @@ void generate_next_volume_list(struct Volume_struct **Volumes, int number_of_vol
           }
         }
         */
-        
+
         // Remove mask volumes from the next volume list, as they never occur as current_volume, and thus just create dead branches that takes up memory
         for (iterate=Volumes[volume_index]->geometry.next_volume_list.num_elements-1;iterate>-1;iterate--)
           if (Volumes[Volumes[volume_index]->geometry.next_volume_list.elements[iterate]]->geometry.is_mask_volume == 1)
             remove_element_in_list_by_index(&Volumes[volume_index]->geometry.next_volume_list,iterate);
-        
-        
+
+
         if (full_intersection_list.num_elements>0) free(full_intersection_list.elements);
         full_intersection_list.num_elements=0;
-        
+
         char string_output[128];
         MPI_MASTER(
         if (verbal) sprintf(string_output,"Next volume list                %d",volume_index);
@@ -8059,84 +8737,127 @@ void generate_lists(struct Volume_struct **Volumes, struct starting_lists_struct
     // Function to control the generation of lists
     // Some lists are only needed temporary, and are thus declared here to keep them out of the main scope
     // Others are stored in the volume structs as they are needed in the trace algorithm (or tagging)
-    
-    
+
+
     struct pointer_to_1d_int_list **true_children_lists;
     true_children_lists = malloc(number_of_volumes*sizeof(struct pointer_to_1d_int_list*));
+    if (!true_children_lists) {
+      fprintf(stderr,"Failure allocating list in Union function generate_lists 1 - Exit!\n");
+      exit(EXIT_FAILURE);
+    }
     // generate_children_lists both generate the normal children list for each volume, but also the true children list needed locally.
     generate_children_lists(Volumes, true_children_lists, number_of_volumes,verbal);
-    
-    
+
+
     struct pointer_to_1d_int_list **true_overlap_lists;
     true_overlap_lists = malloc(number_of_volumes*sizeof(struct pointer_to_1d_int_list*));
+    if (!true_overlap_lists) {
+      fprintf(stderr,"Failure allocating list in Union function generate_lists 2 - Exit!\n");
+      exit(EXIT_FAILURE);
+    }
     struct pointer_to_1d_int_list **raw_overlap_lists;
     raw_overlap_lists = malloc(number_of_volumes*sizeof(struct pointer_to_1d_int_list*));
-    
+    if (!raw_overlap_lists) {
+      fprintf(stderr,"Failure allocating list in Union function generate_lists 3 - Exit!\n");
+      exit(EXIT_FAILURE);
+    }
     generate_overlap_lists(true_overlap_lists, raw_overlap_lists, Volumes,number_of_volumes,verbal);
-    
-    
+
+
     //generate_intersect_check_lists(true_overlap_lists, Volumes, number_of_volumes, verbal);
-    
-    
+
+
     struct pointer_to_1d_int_list **parents_lists;
     parents_lists = malloc(number_of_volumes*sizeof(struct pointer_to_1d_int_list*));
+    if (!parents_lists) {
+      fprintf(stderr,"Failure allocating list in Union function generate_lists 4 - Exit!\n");
+      exit(EXIT_FAILURE);
+    }
     generate_parents_lists(parents_lists,Volumes,number_of_volumes,verbal,1); // The last 1 means masks are taken into account
-    
+
     // Generate version of parent list as it would be without masks
     struct pointer_to_1d_int_list **parents_lists_no_masks;
     parents_lists_no_masks = malloc(number_of_volumes*sizeof(struct pointer_to_1d_int_list*));
+    if (!parents_lists_no_masks) {
+      fprintf(stderr,"Failure allocating list in Union function generate_lists 5 - Exit!\n");
+      exit(EXIT_FAILURE);
+    }
     generate_parents_lists(parents_lists_no_masks,Volumes,number_of_volumes,verbal,0); // The last 0 means masks are NOT taken into account
-    
+
     // Generate version of parent list using true_children instead
     struct pointer_to_1d_int_list **true_parents_lists;
     true_parents_lists = malloc(number_of_volumes*sizeof(struct pointer_to_1d_int_list*));
+    if (!true_parents_lists) {
+      fprintf(stderr,"Failure allocating list in Union function generate_lists 6 - Exit!\n");
+      exit(EXIT_FAILURE);
+    }
     generate_true_parents_lists(true_parents_lists, true_children_lists, Volumes, number_of_volumes, verbal, 1);
-    
+
     // Generate version of parent list no masks using true_children instead
     struct pointer_to_1d_int_list **true_parents_lists_no_masks;
     true_parents_lists_no_masks = malloc(number_of_volumes*sizeof(struct pointer_to_1d_int_list*));
+    if (!true_parents_lists_no_masks) {
+      fprintf(stderr,"Failure allocating list in Union function generate_lists 7 - Exit!\n");
+      exit(EXIT_FAILURE);
+    }
     generate_true_parents_lists(true_parents_lists_no_masks, true_children_lists, Volumes, number_of_volumes, verbal, 0);
-    
+
     // New version of generate intersect lists
     generate_intersect_check_lists_experimental(true_overlap_lists, raw_overlap_lists, parents_lists, true_parents_lists, Volumes, number_of_volumes, verbal);
-    
+
     struct pointer_to_1d_int_list **grandparents_lists;
     grandparents_lists = malloc(number_of_volumes*sizeof(struct pointer_to_1d_int_list*));
+    if (!grandparents_lists) {
+      fprintf(stderr,"Failure allocating list in Union function generate_lists 8 - Exit!\n");
+      exit(EXIT_FAILURE);
+    }
     generate_grandparents_lists(grandparents_lists,parents_lists,number_of_volumes,verbal);
-    
+
     // Generate version of grandparents list as it would have been if no masks were defined
     struct pointer_to_1d_int_list **grandparents_lists_no_masks;
     grandparents_lists_no_masks = malloc(number_of_volumes*sizeof(struct pointer_to_1d_int_list*));
+    if (!grandparents_lists_no_masks) {
+      fprintf(stderr,"Failure allocating list in Union function generate_lists 9 - Exit!\n");
+      exit(EXIT_FAILURE);
+    }
     generate_grandparents_lists(grandparents_lists_no_masks,parents_lists_no_masks,number_of_volumes,verbal);
-    
+
     // Generate true_grandparents_lists
     struct pointer_to_1d_int_list **true_grandparents_lists;
     true_grandparents_lists = malloc(number_of_volumes*sizeof(struct pointer_to_1d_int_list*));
+    if (!true_grandparents_lists) {
+      fprintf(stderr,"Failure allocating list in Union function generate_lists 10 - Exit!\n");
+      exit(EXIT_FAILURE);
+    }
     generate_grandparents_lists(true_grandparents_lists,true_parents_lists,number_of_volumes,verbal);
-    
+
     struct pointer_to_1d_int_list **true_grandparents_lists_no_masks;
     true_grandparents_lists_no_masks = malloc(number_of_volumes*sizeof(struct pointer_to_1d_int_list*));
+    if (!true_grandparents_lists_no_masks) {
+      fprintf(stderr,"Failure allocating list in Union function generate_lists 11 - Exit!\n");
+      exit(EXIT_FAILURE);
+    }
     generate_grandparents_lists(true_grandparents_lists_no_masks,true_parents_lists_no_masks,number_of_volumes,verbal);
-    
+
     // The destinations lists are generated without taking masks into account (they are removed from the overlap list in an early step)
     //generate_destinations_lists(grandparents_lists_no_masks,parents_lists_no_masks,true_overlap_lists,Volumes,number_of_volumes,verbal);
     generate_destinations_lists_experimental(true_overlap_lists, true_children_lists, true_parents_lists_no_masks, true_grandparents_lists_no_masks, Volumes, number_of_volumes, verbal);
-    
+
     // Obsolete, found a way around them in within_which_volume, but need to test the performance difference
     // generate_destinations_logic_lists(Volumes,number_of_volumes,verbal);
-    
+
     generate_reduced_destinations_lists(parents_lists,Volumes,number_of_volumes,verbal);
-    
+
     generate_direct_children_lists(parents_lists,Volumes,number_of_volumes,verbal);
-    
+
     //generate_starting_list(starting_lists,Volumes,number_of_volumes,verbal);
     generate_starting_logic_list(starting_lists,Volumes,number_of_volumes,verbal);
-    
+
     generate_reduced_starting_destinations_list(starting_lists,parents_lists,Volumes,number_of_volumes,verbal);
-    
+
     // This list is stored with the volumes for convinience, but is only used for tagging
     generate_next_volume_list(Volumes,number_of_volumes,verbal);
-    
+
     // Garbage collection for temporary dynamically allocated lists. (Permanent lists freed from FINALLY)
     int iterate;
     for (iterate=0;iterate<number_of_volumes;iterate++) {
@@ -8144,43 +8865,43 @@ void generate_lists(struct Volume_struct **Volumes, struct starting_lists_struct
         //printf("true_overlap_lists[iterate]->num_elements = %d \n",true_overlap_lists[iterate]->num_elements);
         if (true_overlap_lists[iterate]->num_elements > 0) free(true_overlap_lists[iterate]->elements);
         free(true_overlap_lists[iterate]);
-        
+
         //printf("raw_overlap_lists[iterate]->num_elements = %d \n",raw_overlap_lists[iterate]->num_elements);
         if (raw_overlap_lists[iterate]->num_elements > 0) free(raw_overlap_lists[iterate]->elements);
         free(raw_overlap_lists[iterate]);
-        
+
         //printf("parents_lists[iterate]->num_elements = %d \n",parents_lists[iterate]->num_elements);
         if (parents_lists[iterate]->num_elements > 0) free(parents_lists[iterate]->elements);
         free(parents_lists[iterate]);
-        
+
         //printf("parents_lists_no_masks[iterate]->num_elements = %d \n",parents_lists_no_masks[iterate]->num_elements);
         if (parents_lists_no_masks[iterate]->num_elements > 0) free(parents_lists_no_masks[iterate]->elements);
         free(parents_lists_no_masks[iterate]);
-        
+
         //printf("true_parents_lists[iterate]->num_elements = %d \n",true_parents_lists[iterate]->num_elements);
         if (true_parents_lists[iterate]->num_elements > 0) free(true_parents_lists[iterate]->elements);
         free(true_parents_lists[iterate]);
-        
+
         //printf("true_parents_lists_no_masks[iterate]->num_elements = %d \n",true_parents_lists_no_masks[iterate]->num_elements);
         if (true_parents_lists_no_masks[iterate]->num_elements > 0) free(true_parents_lists_no_masks[iterate]->elements);
         free(true_parents_lists_no_masks[iterate]);
-        
+
         //printf("grandparents_lists[iterate]->num_elements = %d \n",grandparents_lists[iterate]->num_elements);
         if (grandparents_lists[iterate]->num_elements > 0) free(grandparents_lists[iterate]->elements);
         free(grandparents_lists[iterate]);
-        
+
         //printf("true_grandparents_lists[iterate]->num_elements = %d \n",true_grandparents_lists[iterate]->num_elements);
         if (true_grandparents_lists[iterate]->num_elements > 0) free(true_grandparents_lists[iterate]->elements);
         free(true_grandparents_lists[iterate]);
-        
+
         //printf("grandparents_lists_no_masks[iterate]->num_elements = %d \n",grandparents_lists_no_masks[iterate]->num_elements);
         if (grandparents_lists_no_masks[iterate]->num_elements > 0) free(grandparents_lists_no_masks[iterate]->elements);
         free(grandparents_lists_no_masks[iterate]);
-        
+
         //printf("true_grandparents_lists_no_masks[iterate]->num_elements = %d \n",true_grandparents_lists_no_masks[iterate]->num_elements);
         if (true_grandparents_lists_no_masks[iterate]->num_elements > 0) free(true_grandparents_lists_no_masks[iterate]->elements);
         free(true_grandparents_lists_no_masks[iterate]);
-        
+
         //printf("true_children_lists[iterate]->num_elements = %d \n",true_children_lists[iterate]->num_elements);
         if (true_children_lists[iterate]->num_elements > 0) free(true_children_lists[iterate]->elements);
         free(true_children_lists[iterate]);
@@ -8226,13 +8947,13 @@ void generate_lists(struct Volume_struct **Volumes, struct starting_lists_struct
 
 void randvec_target_rect_angular_union(Coords *v_out,double *solid_angle_out, struct focus_data_struct *focus_data) {
     // Calls the standard McStas randvec_target_rect_angular focusing function, but is with the new data input format.
-    randvec_target_rect_angular(&v_out->x, &v_out->y, &v_out->z, solid_angle_out, focus_data->Aim.x,focus_data->Aim.y, focus_data->Aim.z, focus_data->angular_focus_width, focus_data->angular_focus_height,focus_data->absolute_rotation);
+    randvec_target_rect_angular(&v_out->x, &v_out->y, &v_out->z, solid_angle_out, focus_data->RayAim.x,focus_data->RayAim.y, focus_data->RayAim.z, focus_data->angular_focus_width, focus_data->angular_focus_height,focus_data->absolute_rotation);
     //randvec_target_rect_angular(&vx, &vy, &vz, &solid_angle,aim_x, aim_y, aim_z, VarsInc.aw, VarsInc.ah, ROT_A_CURRENT_COMP);
 };
 
 void randvec_target_rect_union(Coords *v_out,double *solid_angle_out, struct focus_data_struct *focus_data) {
 // Calls the standard McStas randvec_target_rect focusing function, but is with the new data input format.
-    randvec_target_rect(&v_out->x, &v_out->y, &v_out->z, solid_angle_out, focus_data->Aim.x,focus_data->Aim.y, focus_data->Aim.z, focus_data->spatial_focus_width, focus_data->spatial_focus_height,focus_data->absolute_rotation);
+    randvec_target_rect(&v_out->x, &v_out->y, &v_out->z, solid_angle_out, focus_data->RayAim.x,focus_data->RayAim.y, focus_data->RayAim.z, focus_data->spatial_focus_width, focus_data->spatial_focus_height,focus_data->absolute_rotation);
     // randvec_target_rect(&vx, &vy, &vz, &solid_angle,aim_x, aim_y, aim_z, VarsInc.xw, VarsInc.yh, ROT_A_CURRENT_COMP);
 };
 
@@ -8243,7 +8964,7 @@ void randvec_target_circle_union(Coords *v_out,double *solid_angle_out, struct f
     //print_position(focus_data->Aim,"Aim vector input for randvec_target_circle");
     //printf("Radius input %f\n",focus_data->spatial_focus_radius);
 
-    randvec_target_circle(&v_out->x, &v_out->y, &v_out->z, solid_angle_out, focus_data->Aim.x,focus_data->Aim.y, focus_data->Aim.z, focus_data->spatial_focus_radius);
+    randvec_target_circle(&v_out->x, &v_out->y, &v_out->z, solid_angle_out, focus_data->RayAim.x,focus_data->RayAim.y, focus_data->RayAim.z, focus_data->spatial_focus_radius);
     //randvec_target_circle(&vx, &vy, &vz, &solid_angle, aim_x, aim_y, aim_z, focus_r);
 };
 
@@ -8260,38 +8981,30 @@ void focus_initialize(struct geometry_struct *geometry, Coords POS_A_TARGET, Coo
   // Input sanitation
   if (angular_focus_width < 0) {
     printf("\nERROR in Union geometry component named \"%s\", angular focus width focus_aw < 0! \n",component_name);
-    exit(1);
+    exit(EXIT_FAILURE);
   }
   if (angular_focus_height < 0) {
     printf("\nERROR in Union geometry component named \"%s\", angular focus width focus_ah < 0! \n",component_name);
-    exit(1);
+    exit(EXIT_FAILURE);
   }
   if (spatial_focus_width < 0) {
     printf("\nERROR in Union geometry component named \"%s\", spatial focus width focus_xw < 0! \n",component_name);
-    exit(1);
+    exit(EXIT_FAILURE);
   }
   if (spatial_focus_height < 0) {
     printf("\nERROR in Union geometry component named \"%s\", spatial focus height focus_xh < 0! \n",component_name);
-    exit(1);
+    exit(EXIT_FAILURE);
   }
   if (spatial_focus_radius < 0) {
     printf("\nERROR in Union geometry component named \"%s\", spatial focus radius focus_r < 0! \n",component_name);
-    exit(1);
+    exit(EXIT_FAILURE);
   }
   
   struct focus_data_struct focus_data;
 
   // Initialize focus_data_struct
-  /*
-  geometry->focus_data.Aim = coords_set(0,0,0);
-  geometry->focus_data.angular_focus_width = 0;
-  geometry->focus_data.angular_focus_height = 0;
-  geometry->focus_data.spatial_focus_width = 0;
-  geometry->focus_data.spatial_focus_height = 0;
-  geometry->focus_data.spatial_focus_radius = 0;
-  rot_copy(geometry->focus_data.absolute_rotation,ROT_A_CURRENT);
-  */
   focus_data.Aim = coords_set(0,0,0);
+  focus_data.RayAim = coords_set(0,0,0);
   focus_data.angular_focus_width = 0;
   focus_data.angular_focus_height = 0;
   focus_data.spatial_focus_width = 0;
@@ -8304,14 +9017,13 @@ void focus_initialize(struct geometry_struct *geometry, Coords POS_A_TARGET, Coo
   {
     Coords ToTarget;
     //ToTarget = coords_sub(POS_A_COMP_INDEX(INDEX_CURRENT_COMP+target_index),POS_A_CURRENT_COMP);
-    ToTarget = coords_sub(POS_A_TARGET,POS_A_CURRENT);
-    //ToTarget = rot_apply(ROT_A_CURRENT_COMP, ToTarget);
+    ToTarget = coords_sub(POS_A_TARGET, POS_A_CURRENT);
     ToTarget = rot_apply(ROT_A_CURRENT, ToTarget);
     coords_get(ToTarget, &focus_data.Aim.x, &focus_data.Aim.y, &focus_data.Aim.z);
   }
   else
   { focus_data.Aim.x = target_x; focus_data.Aim.y = target_y; focus_data.Aim.z = target_z; }
-  
+
   if (!(focus_data.Aim.x || focus_data.Aim.y || focus_data.Aim.z)) {
     // Somehow set a variable to signify scattering into 4pi
     // printf("Union %s: The target is not defined. Using scattering into 4pi.\n",NAME_CURRENT_COMP);
@@ -8331,7 +9043,7 @@ void focus_initialize(struct geometry_struct *geometry, Coords POS_A_TARGET, Coo
     focus_data.spatial_focus_height = spatial_focus_height;
     if (focusing_model_selected) {
         printf("ERROR %s: Select either angular or spatial focusing, not both! Exiting \n",component_name);
-        exit(1);
+        exit(EXIT_FAILURE);
     }
     focusing_model_selected = 1;
   }
@@ -8340,7 +9052,7 @@ void focus_initialize(struct geometry_struct *geometry, Coords POS_A_TARGET, Coo
     focus_data.spatial_focus_radius = spatial_focus_radius;
     if (focusing_model_selected) {
         printf("ERROR %s: Select a maximum of one focusing method (spatial rectangle or cicle, or angular rectangle! Exiting \n",component_name);
-        exit(1);
+        exit(EXIT_FAILURE);
     }
     focusing_model_selected = 1;
   }
@@ -8349,10 +9061,9 @@ void focus_initialize(struct geometry_struct *geometry, Coords POS_A_TARGET, Coo
     focus_data.spatial_focus_radius = 0;
     focus_data.focusing_function = &randvec_target_circle_union;
   }
-  
+
   // Allocate the isotropic focus_data struct
   geometry->focus_data_array.num_elements = 0;
-  //geometry->focus_data_array.elements = malloc(sizeof(focus_data_struct));
   add_element_to_focus_data_array(&geometry->focus_data_array,focus_data);
 };
 
@@ -8371,42 +9082,47 @@ struct abs_event{
 void initialize_absorption_file() {
   FILE *fp;
   fp = fopen("Union_absorption.dat","w");
-  fprintf(fp,"r_old x, r_old y, r_old z, old t, r x, r y, r z, new t, weight change, volume index, neutron id \n");
-  
-  fclose(fp);
+  if(!fp) {
+    fprintf(stderr,"WARNING: Could not write initial output to Union_absorption.dat\n");
+  } else {
+    fprintf(fp,"r_old x, r_old y, r_old z, old t, r x, r y, r z, new t, weight change, volume index, neutron id \n");
+    fclose(fp);
+  }
 }
 
 void write_events_to_file(int last_index, struct abs_event *events) {
 
   FILE *fp;
   fp = fopen("Union_absorption.dat","a");
-  
-  struct abs_event *this_event;
-  int iterate;
-  for (iterate=0; iterate<last_index; iterate++) {
-  
-    this_event = &events[iterate];
-    fprintf(fp,"%g, %g, %g, %g, %g, %g, %g, %g, %e, %i, %i \n",
-           this_event->position1[0], this_event->position1[1], this_event->position1[2], this_event->time1,
-           this_event->position2[0], this_event->position2[1], this_event->position2[2], this_event->time2,
-           this_event->weight_change,
-           this_event->volume_index,
-           this_event->neutron_id);
-  }
+  if(!fp) {
+    fprintf(stderr,"WARNING: Could not write logging output to Union_absorption.dat\n");
+  } else {
+    struct abs_event *this_event;
+    int iterate;
+    for (iterate=0; iterate<last_index; iterate++) {
 
-  fclose(fp);
+      this_event = &events[iterate];
+      fprintf(fp,"%g, %g, %g, %g, %g, %g, %g, %g, %e, %i, %i \n",
+	      this_event->position1[0], this_event->position1[1], this_event->position1[2], this_event->time1,
+	      this_event->position2[0], this_event->position2[1], this_event->position2[2], this_event->time2,
+	      this_event->weight_change,
+	      this_event->volume_index,
+	      this_event->neutron_id);
+    }
+    fclose(fp);
+  }
 }
 
 void record_abs_to_file(double *r, double t1, double *r_old, double t2, double weight_change, int volume, int neutron_id, int *data_index, struct abs_event *events) {
-  
-  
-  
+
+
+
   struct abs_event *this_event;
-  
+
   this_event = &events[(*data_index)++];
-  
+
   //printf("Recording something! %i\n", *data_index);
-  
+
   this_event->position1[0] = r[0];
   this_event->position1[1] = r[1];
   this_event->position1[2] = r[2];
@@ -8418,10 +9134,10 @@ void record_abs_to_file(double *r, double t1, double *r_old, double t2, double w
   this_event->weight_change = weight_change;
   this_event->volume_index = volume;
   this_event->neutron_id = neutron_id;
-  
-  
+
+
   if (*data_index == 999) {
-    
+
       write_events_to_file(*data_index, events);
       *data_index = 0;
 
@@ -8429,5 +9145,77 @@ void record_abs_to_file(double *r, double t1, double *r_old, double t2, double w
 
 };
 
+void manual_linking_function_surface(char *input_string, struct pointer_to_global_surface_list *global_surface_list, struct pointer_to_1d_int_list *accepted_surfaces, char *component_name) {
 
+   char *token;
+   int loop_index;
+   char local_string[256];
+   
+   strcpy(local_string, input_string);
+   
+   // get the first token
+   token = strtok(local_string,",");
+   
+   // walk through tokens
+   while(token != NULL) 
+   {
+      //printf( " %s\n", token );
+      for (loop_index=0; loop_index<global_surface_list->num_elements; loop_index++) {
+        if (strcmp(token, global_surface_list->elements[loop_index].name) == 0) {
+          add_element_to_int_list(accepted_surfaces, loop_index);
+          break;
+        } 
+
+        if (loop_index == global_surface_list->num_elements - 1) {
+          // All possible surface names have been looked through, and the break was not executed.
+          // Alert the user to this problem by showing the surface name that was not found and the currently available surface definitions
+            printf("\n");
+            printf("ERROR: The surface string \"%s\" in Union geometry \"%s\" had an entry that did not match a specified surface definition. \n", input_string, component_name);
+            printf("       The unrecoignized surface name was: \"%s\" \n",token);
+            printf("       The surfaces available at this point (need to be defined before the geometry): \n");
+            for (loop_index=0; loop_index<global_surface_list->num_elements; loop_index++)
+              printf("         %s\n",global_surface_list->elements[loop_index].name);
+            exit(EXIT_FAILURE);
+        }
+      }
+      
+      // Updates the token
+      token = strtok(NULL,",");
+   }
+}
+
+void fill_surface_stack(char *input_string, struct pointer_to_global_surface_list *global_surface_list, char *component_name,
+                        struct surface_stack_struct *surface_stack) {
+	// Takes empty surface_stack struct, allocates the memory and fills it with appropriate pointers to the surfaces requested in input_string
+				   
+	if (input_string && strlen(input_string) && strcmp(input_string, "NULL") && strcmp(input_string, "0") && strcmp(input_string, "None")) {
+		
+	  struct pointer_to_1d_int_list accepted_surfaces;
+	  accepted_surfaces.num_elements = 0;
+	  
+	  manual_linking_function_surface(input_string, global_surface_list, &accepted_surfaces, component_name);
+	  
+	  surface_stack->number_of_surfaces = accepted_surfaces.num_elements;
+	  surface_stack->p_surface_array = malloc(surface_stack->number_of_surfaces*sizeof(struct surface_process_struct*));
+	  if (!surface_stack->p_surface_array) {
+	    fprintf(stderr,"Failure allocating list in Union function fill_surface_stack - Exit!\n");
+	    exit(EXIT_FAILURE);
+	  }
+	
+	  int loop_index;
+  	  for (loop_index=0; loop_index<accepted_surfaces.num_elements; loop_index++) {
+	      surface_stack->p_surface_array[loop_index]=global_surface_list->elements[accepted_surfaces.elements[loop_index]].p_surface_process;
+	  }
+		
+	} else {
+	  surface_stack->number_of_surfaces = 0;
+	}
+
+}
+
+void overwrite_if_empty(char *input_string, char *overwrite) {
+   if (!(input_string && strlen(input_string) && strcmp(input_string, "NULL") && strcmp(input_string, "0"))) {
+	   strcpy(input_string, overwrite);
+   }
+}
 

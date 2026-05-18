@@ -95,6 +95,10 @@ def add_mcrun_options(parser):
         type=int, metavar='NP',
         help='Set number of scan points')
 
+    add('--seeds',
+        metavar='SEEDS',
+        help='Set range of seeds to scan (each must be: SEED != 0)')
+
     add('-L', '--list',
         action='store_true',
         help='Use a fixed list of points for linear scanning')
@@ -306,8 +310,11 @@ def add_mcstas_options(parser):
 
     add('-d', '--dir',
         metavar='DIR', type=str,
-        action='callback', callback=check_file(exist=False),
         help='Put all data files in directory DIR')
+
+    add('-a', '--append',
+        action='store_true', default=False,
+        help='Append data files to those already in directory DIR')
 
     add('--format',
         metavar='FORMAT', default='McCode',
@@ -402,6 +409,7 @@ def expand_options(options):
                        datetime.strftime(datetime.now(), DATE_FORMAT_PATH))
         # alert user
         LOG.info('No output directory specified (--dir)')
+
     # Output file
     if options.optimise_file is None:
         # use mccode.dat when unspecified
@@ -440,12 +448,7 @@ def get_parameters(options):
 
 
 def find_instr_file(instr):
-    # Remove [-mpi].out to avoid parsing a binary file
     instr = clean_quotes(instr)
-    if instr.endswith("-mpi." + mccode_config.platform['EXESUFFIX']):
-        instr = instr[:-(5 + len(mccode_config.platform['EXESUFFIX']))]
-    if instr.endswith("." + mccode_config.platform['EXESUFFIX']):
-        instr = instr[:-(1 + len(mccode_config.platform['EXESUFFIX']))]
 
     # Append ".instr" if needed
     if not isfile(instr) and isfile(instr + ".instr"):
@@ -541,6 +544,9 @@ def main():
     mcstas.prepare(options)
 
     (fixed_params, intervals) = get_parameters(options)
+    # Add --seeds as an 'interval', to allow scanning simulation seed
+    if options.seeds:
+        intervals['--seed']=options.seeds.split(',')
 
     # Indicate end of setup / start of computations
     LOG.info('===')
@@ -561,6 +567,10 @@ def main():
     if options.list and options.numpoints:
         raise OptionValueError('--numpoints cannot be used with --list')
 
+    # Can't both do list and --seeds scanning
+    if options.list and options.seeds:
+        raise OptionValueError('--seeds cannot be used with --list')
+
     if options.list:
         if len(intervals) == 0:
             raise OptionValueError(
@@ -569,7 +579,7 @@ def main():
         points = len(pointlist[0])
         if not (all(map(lambda i: len(i) == points, intervals.values()))):
             raise OptionValueError(
-                'All variables much have an equal amount of points.')
+                'All variables must have an equal amount of points.')
         interval_points = LinearInterval.from_list(
             points, intervals)
 
@@ -594,6 +604,9 @@ def main():
         
     # Parameters for linear scanning present
     if interval_points and (options.scan_split is None):
+        # In case of list, update with number of list points
+        if options.list:
+            options.numpoints=len(pointlist[0])
         scanner = Scanner(mcstas, intervals)
         scanner.set_points(interval_points)
         if (not options.dir == ''):

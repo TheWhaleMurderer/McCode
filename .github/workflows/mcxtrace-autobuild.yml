@@ -35,12 +35,12 @@ jobs:
 
     steps:
     - name: Checkout
-      uses: actions/checkout@v5
+      uses: actions/checkout@v6
       with:
         path: McCode
 
     - name: Setup python
-      uses: actions/setup-python@v5
+      uses: actions/setup-python@v6
       with:
         python-version: ${{ matrix.python }}
 
@@ -81,7 +81,7 @@ jobs:
            set -x
            cd McCode
            # Check if this is a clear-cut release-tag build:
-           export REV=`git tag --points-at HEAD`
+           export REV=`git tag --points-at HEAD | cut -b2-`
            # Otherwise, pick latest and add _nightly
            if [ "$REV" == "" ]; then export REV=`git -c 'versionsort.suffix=-' ls-remote --exit-code --refs --sort='version:refname' --tags origin 'v*.*.*' | tail -1 | cut -f3 -d/ | cut -f2 -dv`_nightly; fi
            echo Building on $RUNNER_OS with version set to $REV
@@ -97,7 +97,7 @@ jobs:
            set -x
            cd McCode
            # Check if this is a clear-cut release-tag build:
-           export REV=`git tag --points-at HEAD`
+           export REV=`git tag --points-at HEAD | cut -b2-`
            # Otherwise, pick latest and add _nightly
            if [ "$REV" == "" ]; then export REV=`git -c 'versionsort.suffix=-' ls-remote --exit-code --refs --sort='version:refname' --tags origin 'v*.*.*' | tail -1 | cut -f3 -d/ | cut -f2 -dv`_nightly; fi
            echo Building on $RUNNER_OS with version set to $REV
@@ -112,7 +112,7 @@ jobs:
            set -x
            cd McCode
            # Check if this is a clear-cut release-tag build:
-           export REV=`git tag --points-at HEAD`
+           export REV=`git tag --points-at HEAD | cut -b2-`
            # Otherwise, pick latest and add _nightly
            if [ "$REV" == "" ]; then export REV=`git -c 'versionsort.suffix=-' ls-remote --exit-code --refs --sort='version:refname' --tags origin 'v*.*.*' | tail -1 | cut -f3 -d/ | cut -f2 -dv`_nightly; fi
            echo Cross-compiling for MinGW Windows on $RUNNER_OS with version set to $REV
@@ -122,7 +122,7 @@ jobs:
 
     - name: 'Upload Artifact'
       id: tar-upload
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v6
       if: always()
       with:
         name: mcxtrace-artefacts-${{ matrix.os }}

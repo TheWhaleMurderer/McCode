@@ -1,7 +1,7 @@
 /*******************************************************************************
 *         McStas instrument definition URL=http://www.mcstas.org
 *
-* Instrument: test (rename also the example and DEFINE lines below)
+* Instrument: template (rename also the example and DEFINE lines below)
 *
 * %Identification
 * Written by: Your name (email)
@@ -9,12 +9,12 @@
 * Origin: Your institution
 * %INSTRUMENT_SITE: Templates
 *
-* Instrument short description
+* !!Please write a short instrument (1 line) here!!
 *
 * %Description
 * Instrument longer description (type, elements, usage...)
 *
-* Example: mcrun test.instr <parameters=values>
+* Example: mcrun template.instr <parameters=values>
 *
 * once your instrument is written and functional:
 * - replace INSTRUMENT_SITE entry above with your Institution name as a single word
@@ -24,6 +24,7 @@
 *     sensible parameter set.
 *
 * %Parameters
+* Par: [unit] A parameter description
 *
 * %Link
 * A reference/HTML link for more information

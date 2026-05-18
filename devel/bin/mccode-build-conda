@@ -1,0 +1,167 @@
+#!/usr/bin/env python3
+import sys
+import pathlib
+import os
+import subprocess
+import tempfile
+if not os.name == 'nt':
+    import shlex as lexer
+else:
+    try:
+        import mslex as lexer
+    except ImportError:
+        import shlex as lexer
+
+def runcmd( cmd, capture_output = False ):
+    print()
+    print('LAUNCHING>>> %s'%lexer.join([str(e) for e in cmd]))
+    print()
+    rp = subprocess.run( cmd,
+                         capture_output = capture_output,
+                         check = True  )
+    if not capture_output:
+        return
+    if rp.stderr:
+        print(rp.stderr.decode())
+        raise SystemExit(1)
+    return rp.stdout.decode()
+
+def detect_reporoot():
+    reporoot = pathlib.Path(__file__).parent.parent.parent
+    if not reporoot.joinpath('CHANGES_McStas').is_file():
+        return None
+    return reporoot.absolute()
+
+def detect_condaprefix():
+    cp = os.environ.get('CONDA_PREFIX')
+    if cp:
+        cp = pathlib.Path(cp)
+    if not cp or not cp.joinpath('conda-meta').is_dir():
+        raise SystemExit('ERROR: Could not detect valid '
+                         'conda environment via $CONDA_PREFIX.')
+    return cp.absolute()
+
+def mccode_build_conda ( cfg ):
+
+    if ( cfg.is_mac ):
+        os.environ["SDKROOT"] = runcmd(['xcrun','--sdk','macosx',
+                                        '--show-sdk-path'],
+                                       capture_output = True).strip()
+
+    conda_prefix = detect_condaprefix()
+
+    extra_args = []
+    if ( cfg.is_unix ):
+        nexus_incdir = conda_prefix.joinpath('include/nexus')
+        nexus_libdir = conda_prefix.joinpath('lib')
+        if nexus_libdir.is_dir():
+            extra_args.append( f'-DNEXUSLIB={nexus_libdir}' )
+        if nexus_incdir.is_dir():
+            extra_args.append( f'-DNEXUSINCLUDE={nexus_incdir}' )
+        GENERATOR = 'Unix Makefiles'
+
+    if ( cfg.is_win ):
+        extra_args = ['-DMPILIB=msmpi.lib']
+        GENERATOR = 'NMake Makefiles'
+
+    cmd = ['cmake',
+           f'-DCMAKE_INSTALL_PREFIX={conda_prefix}',
+           '-S', cfg.src_dir,
+           f'-DMCVERSION={cfg.version}',
+           #'-DCMAKE_BUILD_PARALLEL_LEVEL=4',
+           '-DMCCODE_BUILD_CONDA_PKG=ON',
+           '-DBUILD_SHARED_LIBS=ON',
+           '-DCMAKE_INSTALL_LIBDIR=lib',
+           '-DCMAKE_BUILD_TYPE=Release',
+           '-DBUILD_MCSTAS=ON' if cfg.is_mcstas else '-DBUILD_MCXTRACE=ON',
+           '-DMCCODE_USE_LEGACY_DESTINATIONS=OFF',
+           '-DBUILD_TOOLS=ON',
+           '-DENABLE_COMPONENTS=ON',
+           '-DENSURE_MCPL=OFF',
+           '-DENSURE_NCRYSTAL=OFF',
+           '-DENABLE_CIF2HKL=OFF',
+           '-DENABLE_NEUTRONICS=OFF',
+           '-G',GENERATOR]
+    cmd += extra_args
+
+    #configure, build, install:
+
+    def doit(blddir):
+        runcmd( cmd + ['-B', blddir] )
+        runcmd(['cmake','--build',  blddir,'--config','Release'])
+        runcmd(['cmake','--install',blddir,'--config','Release'])
+
+    if cfg.build_dir:
+        doit(cfg.build_dir)
+    else:
+        with tempfile.TemporaryDirectory() as tmp_bld_dir:
+            try:
+                doit(tmp_bld_dir)
+            except Exception:
+                print()
+                print('ERROR: Something went wrong. Try again with a specific'
+                      ' build directory if you need to investigate further.')
+                print()
+                raise
+
+def parse_args( argv ):
+    from argparse import ArgumentParser as AP
+    parser = AP( prog = os.path.basename(argv[0]),
+                 description=('Build and install McStas or McXtrace trace within conda environment'))
+    parser.add_argument('-m','--mode', choices=['mcstas', 'mcxtrace'],
+                        default='mcstas',
+                        help='Choose McStas or McXtrace mode (default: mcstas)')
+    parser.add_argument('-v','--version',
+                        default='3.99.99',
+                        help='Set build version (default: 3.99.99)')
+    reporoot = detect_reporoot()
+    parser.add_argument('-s','--srcdir',
+                        required = (not reporoot),
+                        default = reporoot,
+                        help=( 'Source dir (required since reporoot not found)'
+                               if not reporoot
+                               else 'Source dir (default: McCode repo root)' ) )
+    parser.add_argument('-b','--builddir',
+                        default=None,
+                        help='Build dir (default: use temporary directory)')
+
+    args = parser.parse_args(argv[1:])
+
+    #if not args.platform:
+    args.platform = autodetect_platform()
+
+    sd = pathlib.Path(args.srcdir)
+    if not sd.is_dir():
+        parser.error(f'Missing source dir: {sd}')
+    args.srcdir = sd.absolute()
+
+    return args
+
+def autodetect_platform():
+    import platform
+    return {'Windows':'win',
+            'Darwin':'mac',
+            'Linux':'linux'}[platform.system()]
+
+def create_cfg( args ):
+    class Cfg:
+        mode = args.mode
+        is_mcstas = ( args.mode=='mcstas' )
+        is_mcxtrace = not is_mcstas
+        platform = args.platform
+        is_win   = ( args.platform=='win' )
+        is_linux = ( args.platform=='linux' )
+        is_mac   = ( args.platform=='mac' )
+        is_unix  = ( is_linux or is_mac )
+        src_dir = ( args.srcdir )
+        build_dir = ( args.builddir )
+        version = ( args.version )
+    return Cfg()
+
+def main():
+    args = parse_args( sys.argv )
+    cfg = create_cfg( args )
+    mccode_build_conda( cfg )
+
+if __name__=='__main__':
+    main()

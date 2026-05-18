@@ -35,10 +35,10 @@
 * The 'sphere' option simulates spherical detector. The 'box' is a box.
 * The cylinder, sphere and banana should be centered on the scattering point.
 * In normal configuration, the Monitor_nD measures the current parameters
-* of the photon that is beeing detected. But a PreMonitor_nD component can
-* be used in order to study correlations between a photon being detected in
+* of the photon that is beeing detected. USERVARS may be used in order 
+* to study correlations between a neutron being detected in
 * a Monitor_nD place, and given parameters that are monitored elsewhere
-* (at <b>PreMonitor_nD</b>).
+* (at the point of initialisation of the USERVARS).
 * The monitor can also act as a 3He gas detector, taking into account the
 * detection efficiency.
 *
@@ -68,7 +68,7 @@
 * longitude, lattitude: [-180 180] deg
 * photon: [0 simulaton_ncount]
 * id, pixel id: [0 FLT_MAX]
-* uservars u1,u2,u3: [-1e10 1e10]
+* uservars u0,u1,u2,u3,u4,u5,u6,u7,u8,u9: [-1e10 1e10]
 *
 * In the case of multiple components at the same position, the 'parallel'
 * keyword must be used in each instance instead of defining a GROUP.
@@ -91,8 +91,13 @@
 *     theta longitude       [deg]    longitude (x/z) for sphere and cylinder
 *     phi   lattitude       [deg]    lattitude (y/z) for sphere and cylinder
 *
-*     user user1            will monitor the [Mon_Name]_Vars.UserVariable{1|2|3}
+*     user0 user1           will monitor the [Mon_Name]_Vars.UserVariable{0|1|2|3|4|5}
 *     user2 user3           to be assigned in an other component (see below)
+*     user4 user5
+*     user6 user7
+*     user8 user9
+*
+* Premonitoring:            Please use uservars in place of the former PreMonitor_nD.
 *
 *     p intensity flux      [phts/s  or  phts/cm^2/s]
 *     ncounts n photon      [1]      photon ID, i.e current event index
@@ -120,7 +125,6 @@
 *     parallel                  Use this option when the next component is at the same position (parallel components)
 *     per cm2                   Intensity will be per cm^2 (detector area). Displays beam section.
 *     per steradian             Intensity will be per steradian (requires auto)
-*     premonitor                Will monitor photon parameters stored previously with <b>PreMonitor_nD</b>.
 *     signal=[var]              Will monitor [var] instead of usual intensity
 *     slit or absorb            Absorb photons that are out detector
 *     source                    The monitor will save photon states
@@ -169,8 +173,6 @@
 *       options="user1, auto")
 *      AT ...
 *
-* See also the example in <a href="PreMonitor_nD.html">PreMonitor_nD</a> to
-* monitor photon parameters cross-correlations.
 *
 * %BUGS
 * The 'auto' option for guessing optimal variable bounds should NOT be used with MPI
@@ -190,12 +192,26 @@
 * bins:   [1]    Number of bins to force for all variables. Use 'bins' keyword in 'options' for heterogeneous bins
 * min:    [u]    Minimum range value to force for all variables. Use 'min' or 'limits' keyword in 'options' for other limits
 * max:    [u]    Maximum range value to force for all variables. Use 'max' or 'limits' keyword in 'options' for other limits
+* user0: [str]           Variable name of USERVAR to be monitored by user0.
 * user1: [str] Variable name of USERVAR to be monitored by user1.
 * user2: [str] Variable name of USERVAR to be monitored by user2.
 * user3: [str] Variable name of USERVAR to be monitored by user3.
+* user4: [str]           Variable name of USERVAR to be monitored by user4.
+* user5: [str]           Variable name of USERVAR to be monitored by user5.
+* user6: [str]           Variable name of USERVAR to be monitored by user6.
+* user7: [str]           Variable name of USERVAR to be monitored by user7.
+* user8: [str]           Variable name of USERVAR to be monitored by user8.
+* user9: [str]           Variable name of USERVAR to be monitored by user9.
+* username0: [str]       Name assigned to User0
 * username1:  [str] Name assigned to User1
 * username2:  [str] Name assigned to User2
 * username3:  [str] Name assigned to User3
+* username4: [str]       Name assigned to User4
+* username5: [str]       Name assigned to User5
+* username6: [str]       Name assigned to User6
+* username7: [str]       Name assigned to User7
+* username8: [str]       Name assigned to User8
+* username9: [str]       Name assigned to User9
 * restore_xray: [0|1] If set, the monitor does not influence the photon state. Equivalent to setting the 'parallel' option.
 * geometry:   [str] Name of an OFF file to specify a complex geometry detector
 * nowritefile: [1]      If set, monitor will skip writing to disk
@@ -206,18 +222,21 @@
 * Vars: [struct]  structure containing Monitor_nD variables.
 *
 * %Link
-* <a href="PreMonitor_nD.html">PreMonitor_nD</a>
 *
 * %End
 ******************************************************************************/
 DEFINE COMPONENT Monitor_nD
 
 SETTING PARAMETERS (
-  string user1="", string user2="", string user3="",
+  string user0="", string user1="", string user2="", string user3="",
+  string user4="", string user5="", string user6="", string user7="",
+  string user8="", string user9="",
   xwidth=0, yheight=0, zdepth=0,
-  bins=0, min=-1e40, max=1e40, restore_xray=0, radius=0,
+  int bins=0, min=-1e40, max=1e40, restore_xray=0, radius=0,
   string options="NULL", string filename="NULL",string geometry="NULL", int nowritefile=0,
-  string username1="NULL", string username2="NULL", string username3="NULL"
+  string username0="NULL",string username1="NULL", string username2="NULL", string username3="NULL",
+  string username4="NULL",string username5="NULL", string username6="NULL", string username7="NULL",
+  string username8="NULL", string username9="NULL"
 )
 /* these are protected C variables */
 
@@ -241,145 +260,223 @@ DECLARE
 INITIALIZE
 %{
   char tmp[CHAR_BUF_LENGTH];
-  strcpy(Vars.compcurname, NAME_CURRENT_COMP);
-  Vars.compcurindex=INDEX_CURRENT_COMP;
+  strcpy (Vars.compcurname, NAME_CURRENT_COMP);
+  Vars.compcurindex = INDEX_CURRENT_COMP;
   if (options != NULL)
-    strncpy(Vars.option, options, CHAR_BUF_LENGTH);
+    strncpy (Vars.option, options, CHAR_BUF_LENGTH);
   else {
-    strcpy(Vars.option, "x y");
-    printf("Monitor_nD: %s has no option specified. Setting to PSD ('x y') monitor.\n", NAME_CURRENT_COMP);
+    strcpy (Vars.option, "x y");
+    printf ("Monitor_nD: %s has no option specified. Setting to PSD ('x y') monitor.\n", NAME_CURRENT_COMP);
   }
   Vars.compcurpos = POS_A_CURRENT_COMP;
 
-  if (strstr(Vars.option, "source"))
-    strcat(Vars.option, " list, x y z kx ky kz phi t Ex Ey Ez ");
+  if (strstr (Vars.option, "source"))
+    strcat (Vars.option, " list, x y z kx ky kz phi t Ex Ey Ez ");
 
-  if (bins) { sprintf(tmp, " all bins=%ld ", (long)bins); strcat(Vars.option, tmp); }
-  if (min > -FLT_MAX && max < FLT_MAX) { sprintf(tmp, " all limits=[%g %g]", min, max); strcat(Vars.option, tmp); }
-  else if (min > -FLT_MAX) { sprintf(tmp, " all min=%g", min); strcat(Vars.option, tmp); }
-  else if (max <  FLT_MAX) { sprintf(tmp, " all max=%g", max); strcat(Vars.option, tmp); }
+  if (bins) {
+    sprintf (tmp, " all bins=%ld ", (long)bins);
+    strcat (Vars.option, tmp);
+  }
+  if (min > -FLT_MAX && max < FLT_MAX) {
+    sprintf (tmp, " all limits=[%g %g]", min, max);
+    strcat (Vars.option, tmp);
+  } else if (min > -FLT_MAX) {
+    sprintf (tmp, " all min=%g", min);
+    strcat (Vars.option, tmp);
+  } else if (max < FLT_MAX) {
+    sprintf (tmp, " all max=%g", max);
+    strcat (Vars.option, tmp);
+  }
 
   /* transfer, "zero", and check username- and user variable strings to Vars struct*/
-  strncpy(Vars.UserName1,
-    username1 && strlen(username1) && strcmp(username1, "0") && strcmp(username1, "NULL") ?
-    username1 : "", 128);
-  strncpy(Vars.UserName2,
-    username2 && strlen(username2) && strcmp(username2, "0") && strcmp(username2, "NULL") ?
-    username2 : "", 128);
-  strncpy(Vars.UserName3,
-    username3 && strlen(username3) && strcmp(username3, "0") && strcmp(username3, "NULL") ?
-    username3 : "", 128);
-  if(user1 && strlen(user1) && strcmp(user1, "0") && strcmp(user1, "NULL")){
-    strncpy(Vars.UserVariable1,user1,128);
-    int fail;_class_particle testparticle;
-    particle_getvar(&testparticle,Vars.UserVariable1,&fail);
-    if(fail){
-      fprintf(stderr,"Warning (%s): user1=%s is unknown. The signal will not be resolved - this is likely not what you intended.\n",NAME_CURRENT_COMP,user1);
+  strncpy (Vars.UserName0, username1&& strlen (username0) && strcmp (username0, "0") && strcmp (username0, "NULL") ? username0 : "", 128);
+  strncpy (Vars.UserName1, username1&& strlen (username1) && strcmp (username1, "0") && strcmp (username1, "NULL") ? username1 : "", 128);
+  strncpy (Vars.UserName2, username2&& strlen (username2) && strcmp (username2, "0") && strcmp (username2, "NULL") ? username2 : "", 128);
+  strncpy (Vars.UserName3, username3&& strlen (username3) && strcmp (username3, "0") && strcmp (username3, "NULL") ? username3 : "", 128);
+  strncpy (Vars.UserName4, username4&& strlen (username4) && strcmp (username4, "0") && strcmp (username4, "NULL") ? username4 : "", 128);
+  strncpy (Vars.UserName5, username5&& strlen (username5) && strcmp (username5, "0") && strcmp (username5, "NULL") ? username5 : "", 128);
+  strncpy (Vars.UserName6, username6&& strlen (username6) && strcmp (username6, "0") && strcmp (username6, "NULL") ? username6 : "", 128);
+  strncpy (Vars.UserName7, username7&& strlen (username7) && strcmp (username7, "0") && strcmp (username7, "NULL") ? username7 : "", 128);
+  strncpy (Vars.UserName8, username8&& strlen (username8) && strcmp (username8, "0") && strcmp (username8, "NULL") ? username8 : "", 128);
+  strncpy (Vars.UserName9, username9&& strlen (username9) && strcmp (username9, "0") && strcmp (username9, "NULL") ? username9 : "", 128);
+  if (user0 && strlen (user0) && strcmp (user0, "0") && strcmp (user0, "NULL")) {
+    strncpy (Vars.UserVariable0, user0, 128);
+    int fail;
+    _class_particle testparticle;
+    particle_getvar (&testparticle, Vars.UserVariable0, &fail);
+    if (fail) {
+      fprintf (stderr, "Warning (%s): user0=%s is unknown. The signal will not be resolved - this is likely not what you intended.\n", NAME_CURRENT_COMP, user0);
     }
   }
-  if(user2 && strlen(user2) && strcmp(user2, "0") && strcmp(user2, "NULL")){
-    strncpy(Vars.UserVariable2,user2,128);
-    int fail;_class_particle testparticle;
-    particle_getvar(&testparticle,Vars.UserVariable2,&fail);
-    if(fail){
-      fprintf(stderr,"Warning (%s): user2=%s is unknown. The signal will not be resolved - this is likely not what you intended.\n",NAME_CURRENT_COMP,user2);
+  if (user1 && strlen (user1) && strcmp (user1, "0") && strcmp (user1, "NULL")) {
+    strncpy (Vars.UserVariable1, user1, 128);
+    int fail;
+    _class_particle testparticle;
+    particle_getvar (&testparticle, Vars.UserVariable1, &fail);
+    if (fail) {
+      fprintf (stderr, "Warning (%s): user1=%s is unknown. The signal will not be resolved - this is likely not what you intended.\n", NAME_CURRENT_COMP, user1);
     }
   }
-  if(user3 && strlen(user3) && strcmp(user3, "0") && strcmp(user3, "NULL")){
-    strncpy(Vars.UserVariable3,user3,128);
-    int fail;_class_particle testparticle;
-    particle_getvar(&testparticle,Vars.UserVariable3,&fail);
-    if(fail){
-      fprintf(stderr,"Warning (%s): user3=%s is unknown. The signal will not be resolved - this is likely not what you intended.\n",NAME_CURRENT_COMP,user3);
+  if (user2 && strlen (user2) && strcmp (user2, "0") && strcmp (user2, "NULL")) {
+    strncpy (Vars.UserVariable2, user2, 128);
+    int fail;
+    _class_particle testparticle;
+    particle_getvar (&testparticle, Vars.UserVariable2, &fail);
+    if (fail) {
+      fprintf (stderr, "Warning (%s): user2=%s is unknown. The signal will not be resolved - this is likely not what you intended.\n", NAME_CURRENT_COMP, user2);
     }
   }
- 
-  /*sanitize parameters set for curved shapes*/
-  if(strstr(Vars.option,"cylinder") || strstr(Vars.option,"banana") || strstr(Vars.option,"sphere")){
-    /*this _is_ an explicit curved shape. Should have a radius. Inherit from xwidth or zdepth (diameters), x has precedence.*/
-    if (!radius){
-      if(xwidth){
-	radius=xwidth/2.0;
-      }else{
-	radius=zdepth/2.0;
-      }
-    }else{
-      /*radius is set - propagate to xwidth. It is used inside monitor_nd-lib*/
-      xwidth=2*radius;
+  if (user3 && strlen (user3) && strcmp (user3, "0") && strcmp (user3, "NULL")) {
+    strncpy (Vars.UserVariable3, user3, 128);
+    int fail;
+    _class_particle testparticle;
+    particle_getvar (&testparticle, Vars.UserVariable3, &fail);
+    if (fail) {
+      fprintf (stderr, "Warning (%s): user3=%s is unknown. The signal will not be resolved - this is likely not what you intended.\n", NAME_CURRENT_COMP, user3);
     }
-    if(!yheight){
-      /*if not set - use the diameter as height for the curved object. This will likely only happen for spheres*/
-      yheight=2*radius;
+  }
+  if (user4 && strlen (user4) && strcmp (user4, "0") && strcmp (user4, "NULL")) {
+    strncpy (Vars.UserVariable4, user4, 128);
+    int fail;
+    _class_particle testparticle;
+    particle_getvar (&testparticle, Vars.UserVariable4, &fail);
+    if (fail) {
+      fprintf (stderr, "Warning (%s): user4=%s is unknown. The signal will not be resolved - this is likely not what you intended.\n", NAME_CURRENT_COMP, user4);
     }
-  }else if (radius) {
-    /*radius is set - this must be curved shape then. Infer shape from yheight*/
-    xwidth = zdepth = 2*radius;
-    if (yheight){
-      /*a height is given (and no shape explitly set - assume cylinder*/
-      strcat(Vars.option, " banana");
-    }else {
-      strcat(Vars.option, " sphere");
-      yheight=2*radius;
+  }
+  if (user5 && strlen (user5) && strcmp (user5, "0") && strcmp (user5, "NULL")) {
+    strncpy (Vars.UserVariable5, user5, 128);
+    int fail;
+    _class_particle testparticle;
+    particle_getvar (&testparticle, Vars.UserVariable5, &fail);
+    if (fail) {
+      fprintf (stderr, "Warning (%s): user5=%s is unknown. The signal will not be resolved - this is likely not what you intended.\n", NAME_CURRENT_COMP, user5);
+    }
+  }
+  if (user6 && strlen (user6) && strcmp (user6, "0") && strcmp (user6, "NULL")) {
+    strncpy (Vars.UserVariable6, user6, 128);
+    int fail;
+    _class_particle testparticle;
+    particle_getvar (&testparticle, Vars.UserVariable6, &fail);
+    if (fail) {
+      fprintf (stderr, "Warning (%s): user6=%s is unknown. The signal will not be resolved - this is likely not what you intended.\n", NAME_CURRENT_COMP, user6);
+    }
+  }
+  if (user7 && strlen (user7) && strcmp (user7, "0") && strcmp (user7, "NULL")) {
+    strncpy (Vars.UserVariable7, user7, 128);
+    int fail;
+    _class_particle testparticle;
+    particle_getvar (&testparticle, Vars.UserVariable7, &fail);
+    if (fail) {
+      fprintf (stderr, "Warning (%s): user7=%s is unknown. The signal will not be resolved - this is likely not what you intended.\n", NAME_CURRENT_COMP, user7);
+    }
+  }
+  if (user8 && strlen (user8) && strcmp (user8, "0") && strcmp (user8, "NULL")) {
+    strncpy (Vars.UserVariable8, user8, 128);
+    int fail;
+    _class_particle testparticle;
+    particle_getvar (&testparticle, Vars.UserVariable8, &fail);
+    if (fail) {
+      fprintf (stderr, "Warning (%s): user8=%s is unknown. The signal will not be resolved - this is likely not what you intended.\n", NAME_CURRENT_COMP, user8);
+    }
+  }
+  if (user9 && strlen (user9) && strcmp (user9, "0") && strcmp (user9, "NULL")) {
+    strncpy (Vars.UserVariable9, user9, 128);
+    int fail;
+    _class_particle testparticle;
+    particle_getvar (&testparticle, Vars.UserVariable9, &fail);
+    if (fail) {
+      fprintf (stderr, "Warning (%s): user9=%s is unknown. The signal will not be resolved - this is likely not what you intended.\n", NAME_CURRENT_COMP, user9);
     }
   }
 
-  int offflag=0;
-  if (geometry && strlen(geometry) && strcmp(geometry,"0") && strcmp(geometry, "NULL")) {
-    #ifndef USE_OFF
-    fprintf(stderr,"Error: You are attempting to use an OFF geometry without -DUSE_OFF. You will need to recompile with that define set!\n");
-    exit(-1);
-    #else
-    if (!off_init(  geometry, xwidth, yheight, zdepth, 1, &offdata )) {
-      printf("Monitor_nD: %s could not initiate the OFF geometry %s. \n"
-             "            Defaulting to normal Monitor dimensions.\n",
-             NAME_CURRENT_COMP, geometry);
-      strcpy(geometry, "");
+  /*sanitize parameters set for curved shapes*/
+  if (strstr (Vars.option, "cylinder") || strstr (Vars.option, "banana") || strstr (Vars.option, "sphere")) {
+    /*this _is_ an explicit curved shape. Should have a radius. Inherit from xwidth or zdepth (diameters), x has precedence.*/
+    if (!radius) {
+      if (xwidth) {
+        radius = xwidth / 2.0;
+      } else {
+        radius = zdepth / 2.0;
+      }
     } else {
-      offflag=1;
+      /*radius is set - propagate to xwidth. It is used inside monitor_nd-lib*/
+      xwidth = 2 * radius;
+    }
+    if (!yheight) {
+      /*if not set - use the diameter as height for the curved object. This will likely only happen for spheres*/
+      yheight = 2 * radius;
+    }
+  } else if (radius) {
+    /*radius is set - this must be curved shape then. Infer shape from yheight*/
+    xwidth = zdepth = 2 * radius;
+    if (yheight) {
+      /*a height is given (and no shape explitly set - assume cylinder*/
+      strcat (Vars.option, " banana");
+    } else {
+      strcat (Vars.option, " sphere");
+      yheight = 2 * radius;
+    }
+  }
+
+  int offflag = 0;
+  if (geometry && strlen (geometry) && strcmp (geometry, "0") && strcmp (geometry, "NULL")) {
+    #ifndef USE_OFF
+    fprintf (stderr, "Error: You are attempting to use an OFF geometry without -DUSE_OFF. You will need to recompile with that define set!\n");
+    exit (-1);
+    #else
+    if (!off_init (geometry, xwidth, yheight, zdepth, 1, &offdata)) {
+      printf ("Monitor_nD: %s could not initiate the OFF geometry %s. \n"
+              "            Defaulting to normal Monitor dimensions.\n",
+              NAME_CURRENT_COMP, geometry);
+      strcpy (geometry, "");
+    } else {
+      offflag = 1;
     }
     #endif
   }
-  if (!radius && !xwidth && !yheight && !zdepth &&
-    !strstr(Vars.option, "previous") && (!geometry || !strlen(geometry)))
-    exit(printf("Monitor_nD: %s has no dimension specified. Aborting (radius, xwidth, yheight, zdepth, previous, geometry).\n", NAME_CURRENT_COMP));
+  if (!radius && !xwidth && !yheight && !zdepth && !strstr (Vars.option, "previous") && (!geometry || !strlen (geometry)))
+    exit (printf ("Monitor_nD: %s has no dimension specified. Aborting (radius, xwidth, yheight, zdepth, previous, geometry).\n", NAME_CURRENT_COMP));
 
-  Monitor_nD_Init(&DEFS, &Vars, xwidth, yheight, zdepth, 0,0,0,0,0,0,offflag);
+  Monitor_nD_Init (&DEFS, &Vars, xwidth, yheight, zdepth, 0, 0, 0, 0, 0, 0, offflag);
 
-
-  if (filename && strlen(filename) && strcmp(filename,"NULL") && strcmp(filename,"0"))
-    strncpy(Vars.Mon_File, filename, 128);
+  if (filename && strlen (filename) && strcmp (filename, "NULL") && strcmp (filename, "0"))
+    strncpy (Vars.Mon_File, filename, 128);
 
   /* check if user given filename with ext will be used more than once */
-  if ( ((Vars.Flag_Multiple && Vars.Coord_Number > 1) || Vars.Flag_List) && strchr(Vars.Mon_File,'.') )
-  { char *XY; XY = strrchr(Vars.Mon_File,'.'); *XY='_'; }
+  if (((Vars.Flag_Multiple && Vars.Coord_Number > 1) || Vars.Flag_List) && strchr (Vars.Mon_File, '.')) {
+    char* XY;
+    XY = strrchr (Vars.Mon_File, '.');
+    *XY = '_';
+  }
 
-  if (restore_xray) Vars.Flag_parallel=1;
+  if (restore_xray)
+    Vars.Flag_parallel = 1;
   detector.m = 0;
 
-#ifdef USE_MPI
-MPI_MASTER(
-  if (strstr(Vars.option, "auto") && mpi_node_count > 1)
-    printf("Monitor_nD: %s is using automatic limits option 'auto' together with MPI.\n"
-           "WARNING     this may create incorrect distributions (but integrated flux will be right).\n", NAME_CURRENT_COMP);
-);
-#else
-#ifdef OPENACC
-  if (strstr(Vars.option, "auto"))
-    printf("Monitor_nD: %s is requesting automatic limits option 'auto' together with OpenACC.\n"
-           "WARNING     this feature is NOT supported using OpenACC and has been disabled!\n", NAME_CURRENT_COMP);
-#endif
-#endif
-
+  #ifdef USE_MPI
+  MPI_MASTER (if (strstr (Vars.option, "auto") && mpi_node_count > 1)
+                  printf ("Monitor_nD: %s is using automatic limits option 'auto' together with MPI.\n"
+                          "WARNING     this may create incorrect distributions (but integrated flux will be right).\n",
+                          NAME_CURRENT_COMP););
+  #else
+  #ifdef OPENACC
+  if (strstr (Vars.option, "auto"))
+    printf ("Monitor_nD: %s is requesting automatic limits option 'auto' together with OpenACC.\n"
+            "WARNING     this feature is NOT supported using OpenACC and has been disabled!\n",
+            NAME_CURRENT_COMP);
+  #endif
+  #endif
 %}
 
 TRACE
 %{
-//  double  XY=0;
-  double  l0 = 0;
-  double  l1 = 0;
-  int     pp;
-  int     intersect   = 0;
-  char    Flag_Restore = 0;
+  //  double  XY=0;
+  double l0 = 0;
+  double l1 = 0;
+  int pp;
+  int intersect = 0;
+  char Flag_Restore = 0;
 
   #ifdef OPENACC
   #ifdef USE_OFF
@@ -393,118 +490,84 @@ TRACE
     STORE_XRAY(INDEX_CURRENT_COMP, x, y, z, vx, vy, vz, t, sx, sy, sz, p);
   */
   #ifdef USE_OFF
-  if (geometry && strlen(geometry) && strcmp(geometry,"0") && strcmp(geometry, "NULL"))
-  {
+  if (geometry && strlen (geometry) && strcmp (geometry, "0") && strcmp (geometry, "NULL")) {
     /* determine intersections with object */
-    intersect = off_x_intersect(&l0, &l1, NULL, NULL,
-       x,y,z, kx, ky, kz, offdata );
-  }
-  else 
-  #endif
-    if ( (abs(Vars.Flag_Shape) == DEFS.SHAPE_SQUARE)
-            || (abs(Vars.Flag_Shape) == DEFS.SHAPE_DISK) ) /* square xy or disk xy */
-  {
-    // propagate to xy plane and find intersection
-    // make sure the event is recoverable afterwards
-    l0 = z;
-    ALLOW_BACKPROP;
-    PROP_Z0;
-    if ( (z>=l0) && (z*copysign(z,1.0)<=DBL_EPSILON) ) // forward propagation to xy plane was successful
+    intersect = off_x_intersect (&l0, &l1, NULL, NULL, x, y, z, kx, ky, kz, offdata);
+  } else
+    #endif
+    if ((abs (Vars.Flag_Shape) == DEFS.SHAPE_SQUARE) || (abs (Vars.Flag_Shape) == DEFS.SHAPE_DISK)) /* square xy or disk xy */
     {
-      if (abs(Vars.Flag_Shape) == DEFS.SHAPE_SQUARE)
+      // propagate to xy plane and find intersection
+      // make sure the event is recoverable afterwards
+      l0 = z;
+      ALLOW_BACKPROP;
+      PROP_Z0;
+      if ((z >= l0) && (z * copysign (z, 1.0) <= DBL_EPSILON)) // forward propagation to xy plane was successful
       {
-        // square xy
-        intersect = (x>=Vars.mxmin && x<=Vars.mxmax && y>=Vars.mymin && y<=Vars.mymax);
+        if (abs (Vars.Flag_Shape) == DEFS.SHAPE_SQUARE) {
+          // square xy
+          intersect = (x >= Vars.mxmin && x <= Vars.mxmax && y >= Vars.mymin && y <= Vars.mymax);
+        } else {
+          // disk xy
+          intersect = (SQR (x) + SQR (y)) <= SQR (Vars.Sphere_Radius);
+        }
+      } else {
+        intersect = 0;
       }
-      else
-      {
-        // disk xy
-        intersect = (SQR(x) + SQR(y)) <= SQR(Vars.Sphere_Radius);
-      }
-    }
-    else
+    } else if (abs (Vars.Flag_Shape) == DEFS.SHAPE_SPHERE) /* sphere */
     {
-      intersect=0;
+      intersect = sphere_intersect (&l0, &l1, x, y, z, kx, ky, kz, Vars.Sphere_Radius);
+      /*      intersect = (intersect && t0 > 0); */
+    } else if ((abs (Vars.Flag_Shape) == DEFS.SHAPE_CYLIND) || (abs (Vars.Flag_Shape) == DEFS.SHAPE_BANANA)) /* cylinder */
+    {
+      intersect = cylinder_intersect (&l0, &l1, x, y, z, kx, ky, kz, Vars.Sphere_Radius, Vars.Cylinder_Height);
+    } else if (abs (Vars.Flag_Shape) == DEFS.SHAPE_BOX) /* box */
+    {
+      intersect = box_intersect (&l0, &l1, x, y, z, kx, ky, kz, fabs (Vars.mxmax - Vars.mxmin), fabs (Vars.mymax - Vars.mymin), fabs (Vars.mzmax - Vars.mzmin));
+    } else if (abs (Vars.Flag_Shape) == DEFS.SHAPE_PREVIOUS) /* previous comp */
+    {
+      intersect = 1;
     }
-  }
-  else if (abs(Vars.Flag_Shape) == DEFS.SHAPE_SPHERE) /* sphere */
-  {
-    intersect = sphere_intersect(&l0, &l1, x, y, z, kx, ky, kz, Vars.Sphere_Radius);
-  /*      intersect = (intersect && t0 > 0); */
-  }
-  else if ((abs(Vars.Flag_Shape) == DEFS.SHAPE_CYLIND) || (abs(Vars.Flag_Shape) == DEFS.SHAPE_BANANA)) /* cylinder */
-  {
-    intersect = cylinder_intersect(&l0, &l1, x, y, z, kx, ky, kz, Vars.Sphere_Radius, Vars.Cylinder_Height);
-  }
-  else if (abs(Vars.Flag_Shape) == DEFS.SHAPE_BOX) /* box */
-  {
-    intersect = box_intersect(&l0, &l1, x, y, z, kx, ky, kz, 
-                              fabs(Vars.mxmax-Vars.mxmin), fabs(Vars.mymax-Vars.mymin), fabs(Vars.mzmax-Vars.mzmin));
-  }
-  else if (abs(Vars.Flag_Shape) == DEFS.SHAPE_PREVIOUS) /* previous comp */
-  { intersect = 1; }
 
-  if (intersect)
-  {
-    if ((abs(Vars.Flag_Shape) == DEFS.SHAPE_SPHERE) || (abs(Vars.Flag_Shape) == DEFS.SHAPE_CYLIND) 
-     || (abs(Vars.Flag_Shape) == DEFS.SHAPE_BOX) || (abs(Vars.Flag_Shape) == DEFS.SHAPE_BANANA)
-     || (geometry && strlen(geometry) && strcmp(geometry,"0") && strcmp(geometry, "NULL")) )
-    {
+  if (intersect) {
+    if ((abs (Vars.Flag_Shape) == DEFS.SHAPE_SPHERE) || (abs (Vars.Flag_Shape) == DEFS.SHAPE_CYLIND) || (abs (Vars.Flag_Shape) == DEFS.SHAPE_BOX)
+        || (abs (Vars.Flag_Shape) == DEFS.SHAPE_BANANA) || (geometry && strlen (geometry) && strcmp (geometry, "0") && strcmp (geometry, "NULL"))) {
       /* check if we have to remove the top/bottom with BANANA shape */
-      if ((abs(Vars.Flag_Shape) == DEFS.SHAPE_BANANA) && (intersect != 1)) {
-        double y0,y1;
+      if ((abs (Vars.Flag_Shape) == DEFS.SHAPE_BANANA) && (intersect != 1)) {
+        double y0, y1;
         /* propagate to intersection point as temporary variable to check top/bottom */
-        y0 = y+l0;
-        y1 = y+l1;
-        if (fabs(y0) >= Vars.Cylinder_Height/2*0.99) l0 = l1;
-        if (fabs(y1) >= Vars.Cylinder_Height/2*0.99) l1 = l0;
+        y0 = y + l0;
+        y1 = y + l1;
+        if (fabs (y0) >= Vars.Cylinder_Height / 2 * 0.99)
+          l0 = l1;
+        if (fabs (y1) >= Vars.Cylinder_Height / 2 * 0.99)
+          l1 = l0;
       }
       if (l0 < 0 && l1 > 0)
-        l0 = 0;  /* photon was already inside ! */
+        l0 = 0;             /* photon was already inside ! */
       if (l1 < 0 && l0 > 0) /* photon exit before entering !! */
         l1 = 0;
       /* t0 is now time of incoming intersection with the detection area */
       if ((Vars.Flag_Shape < 0) && (l1 > 0))
-        PROP_DL(l1); /* l1 outgoing beam */
+        PROP_DL (l1); /* l1 outgoing beam */
       else
-        PROP_DL(l0); /* l0 incoming beam */
+        PROP_DL (l0); /* l0 incoming beam */
       /* Final test if we are on lid / bottom of banana/sphere */
-      if (abs(Vars.Flag_Shape) == DEFS.SHAPE_BANANA || abs(Vars.Flag_Shape) == DEFS.SHAPE_SPHERE) {
-        if (Vars.Cylinder_Height && fabs(y) >= Vars.Cylinder_Height/2 - FLT_EPSILON) {
-          intersect=0;
-          Flag_Restore=1;
+      if (abs (Vars.Flag_Shape) == DEFS.SHAPE_BANANA || abs (Vars.Flag_Shape) == DEFS.SHAPE_SPHERE) {
+        if (Vars.Cylinder_Height && fabs (y) >= Vars.Cylinder_Height / 2 - FLT_EPSILON) {
+          intersect = 0;
+          Flag_Restore = 1;
         }
       }
     }
   }
 
-  if (intersect)
-  {
-    /* Now get the data to monitor: current or keep from PreMonitor */
-/*    if (Vars.Flag_UsePreMonitor != 1)*/
-/*    {*/
-/*      Vars.cp  = p;*/
-/*      Vars.cx  = x;*/
-/*      Vars.ckx = kx;*/
-/*      Vars.cEx = Ex;*/
-/*      Vars.cy  = y;*/
-/*      Vars.cky = ky;*/
-/*      Vars.cEy = Ey;*/
-/*      Vars.cz  = z;*/
-/*      Vars.ckz = kz;*/
-/*      Vars.cEz = Ez;*/
-/*      Vars.ct  = t;*/
-/*      Vars.cphi = phi;*/
-/*    }*/
+  if (intersect) {
 
-
-    pp = Monitor_nD_Trace(&DEFS, &Vars, _particle);
-    if (pp==0.0)
-    {
+    pp = Monitor_nD_Trace (&DEFS, &Vars, _particle);
+    if (pp == 0.0) {
       ABSORB;
-    }
-    else if(pp==1)
-    {
+    } else if (pp == 1) {
       SCATTER;
     }
 
@@ -512,42 +575,39 @@ TRACE
       Flag_Restore = 1;
   } /* end if intersection */
   else {
-    if (Vars.Flag_Absorb && !Vars.Flag_parallel)
-    {
+    if (Vars.Flag_Absorb && !Vars.Flag_parallel) {
       // restore x-ray before absorbing for correct mcdisplay
-      RESTORE_XRAY(INDEX_CURRENT_COMP, x, y, z, kx, ky, kz, phi, t, Ex, Ey, Ez, p);
+      RESTORE_XRAY (INDEX_CURRENT_COMP, x, y, z, kx, ky, kz, phi, t, Ex, Ey, Ez, p);
       ABSORB;
-    }
-    else Flag_Restore = 1;  /* no intersection, back to previous state */
+    } else
+      Flag_Restore = 1; /* no intersection, back to previous state */
   }
 
-  if (Flag_Restore)
-  {
-    RESTORE_XRAY(INDEX_CURRENT_COMP, x, y, z, kx, ky, kz, phi, t, Ex, Ey, Ez, p);
+  if (Flag_Restore) {
+    RESTORE_XRAY (INDEX_CURRENT_COMP, x, y, z, kx, ky, kz, phi, t, Ex, Ey, Ez, p);
   }
 %}
 
 SAVE
 %{
-if (!nowritefile) {
-  /* save results, but do not free pointers */
-  detector = Monitor_nD_Save(&DEFS, &Vars);
-}
+  if (!nowritefile) {
+    /* save results, but do not free pointers */
+    detector = Monitor_nD_Save (&DEFS, &Vars);
+  }
 %}
 
 FINALLY
 %{
   /* free pointers */
-  Monitor_nD_Finally(&DEFS, &Vars);
+  Monitor_nD_Finally (&DEFS, &Vars);
 %}
 
 MCDISPLAY
 %{
-  if (geometry && strlen(geometry) && strcmp(geometry,"0") && strcmp(geometry, "NULL"))
-  {
-    off_display(offdata);
+  if (geometry && strlen (geometry) && strcmp (geometry, "0") && strcmp (geometry, "NULL")) {
+    off_display (offdata);
   } else {
-    Monitor_nD_McDisplay(&DEFS, &Vars);
+    Monitor_nD_McDisplay (&DEFS, &Vars);
   }
 %}
 

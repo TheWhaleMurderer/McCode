@@ -387,10 +387,18 @@ macro(installMCCODE)
     install(PROGRAMS ${WORK}/support/${FLAVOR}-module DESTINATION "${DEST_DATADIR_TOPENVFILES}")
 
     install(PROGRAMS ${WORK}/support/${FLAVOR}-postinst DESTINATION "${DEST_BINDIR}")
+
+    # Generate the errormessage wrapper
+    configure_file(
+      cmake/support/run-scripts/mccode_errmsg.in
+      work/support/${FLAVOR}_errmsg mccode_errmsg
+      @ONLY)
     install(PROGRAMS ${WORK}/support/${FLAVOR}_errmsg DESTINATION "${DEST_BINDIR}")
   endif()
 
   if(WINDOWS)
+    cmake_path( CONVERT "${MCCODE_RELPATH_BINDIR2TOOLDIR}" TO_NATIVE_PATH_LIST MCCODE_RELPATH_BINDIR2TOOLDIR)
+
     # Generate and install Windows setup scripts
     foreach (name env.bat env.m go.bat test.bat)
       configure_file(
@@ -407,13 +415,20 @@ macro(installMCCODE)
     install(PROGRAMS ${WORK}/support/${FLAVOR}-labenv.bat DESTINATION "${DEST_BINDIR}")
 
     # Python/Perl related batches special handling
-    foreach (name run.bat doc.bat test.bat viewtest.bat resplot.bat plot.bat display.bat gui.bat guistart.bat plot-pyqtgraph.bat plot-matplotlib.bat plot-matlab.bat display-webgl.bat display-webgl-classic.bat display-pyqtgraph.bat display-cad.bat display-matplotlib.bat display-mantid.bat)
+    foreach (name run.bat doc.bat test.bat viewtest.bat resplot.bat plot.bat display.bat gui.bat guistart.bat plot-pyqtgraph.bat plot-matplotlib.bat plot-matlab.bat display-webgl.bat display-webgl-classic.bat display-pyqtgraph.bat display-cad.bat display-matplotlib.bat display-mantid.bat display-matlab.bat)
       configure_file(
 	      cmake/support/run-scripts/${name}.in
 	      work/support/${MCCODE_PREFIX}${name}
 	      )
       install(PROGRAMS ${WORK}/support/${MCCODE_PREFIX}${name} DESTINATION "${DEST_BINDIR}")
     endforeach()
+
+    # Generate the errormessage wrapper
+    configure_file(
+      cmake/support/run-scripts/mccode_errmsg.bat.in
+      work/support/${FLAVOR}_errmsg.bat
+      @ONLY)
+    install(PROGRAMS ${WORK}/support/${FLAVOR}_errmsg.bat DESTINATION "${DEST_BINDIR}")
 
     # Binaries
     install (

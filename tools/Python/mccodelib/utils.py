@@ -3,9 +3,13 @@ Analysis tools for mcstas component files and instrument files.
 '''
 import re
 import os
+import sys
+import time
+import signal
 from os.path import splitext, join
 import subprocess
 from datetime import datetime
+from pathlib import Path
 
 '''
 Component parser used by initial versions of mcgui. (More recent implementations exist.)
@@ -179,7 +183,7 @@ class ComponentParser(object):
         for p in comma_sep:
             par_info = ComponentParInfo()
             
-            out = re.search(r'(\w+)\s+([\w\-]+)\s*=\s*([-+.\w/*\"]+)', p)
+            out = re.search(r'(\w+)\s+([\w\-]+)\s*=\s*([-+.\w/*\"\s]+)', p)
             if out:
                 # type par_name = def_val
                 par_info.type = out.group(1)
@@ -187,7 +191,7 @@ class ComponentParser(object):
                 par_info.default_value = out.group(3)
             else:
                 # par_name = def_val
-                out = re.search(r'([\w\-]+)\s*=\s*([-+.\w/*\"]+)', p)
+                out = re.search(r'([\w\-]+)\s*=\s*([-+.\w/*\"\s]+)', p)
                 if out:
                     par_info.par_name = out.group(1)
                     par_info.default_value = out.group(2)
@@ -202,34 +206,42 @@ class ComponentParser(object):
     @staticmethod
     def __matchDocStringsToPars(pars, header_P_section):
         # sets docstring values on objects in the "pars" list of McComponentParInfo 
-        parnames = []
-        for i in range(len(pars)):
-            parnames.append(pars[i].par_name)
-        
+        parnames = [p.par_name for p in pars]
         lines = header_P_section.splitlines()
         lastpar = None
-        for i in range(len(lines)):
-            line = lines[i]
-            
-            # check for colon
-            out = re.search(r'(.*):(.*)', line)
+
+        for line in lines:
+            # Try to match "param: description"
+            out = re.search(r'^(.*)([\[\w\s\]])(.*)$', line)
+            candidate = None
+            description = None
+
             if out:
-                # assume that stars in lines have already been stripped
-                candidate = out.group(1).strip()
-                if candidate in parnames:
-                    # candidate is a known par name
-                    j = parnames.index(candidate)
-                    pars[j].doc_and_unit += out.group(2).strip() + ' '
-                    lastpar = pars[j]
-                elif lastpar:
-                    lastpar.doc_and_unit += out.group(2).strip()
-            
+                candidate = out.group(1).rstrip()
+                description = out.group(2).strip()
+            else:
+                # No colon: split on first whitespace only
+                parts = line.split(None, 1)
+                if len(parts) == 2:
+                    candidate, description = parts[0], parts[1].strip()
+                elif len(parts) == 1:
+                    candidate = parts[0]
+                description = ' '
+
+            if candidate and candidate in parnames:
+            # candidate is a known par name
+                j = parnames.index(candidate)
+                pars[j].doc_and_unit += (description + ' ').strip()
+                lastpar = pars[j]
+            elif lastpar and description is not None:
+                # continuation or appended description
+                lastpar.doc_and_unit += ' ' + description.strip()
             elif lastpar and ComponentParser.__stringIsEmptyLine(line):
                 # empty line, close lastpar appending
                 lastpar = None
             elif lastpar:
                 # continuation line, append to lastpar
-                lastpar.doc_and_unit += line.strip()
+                lastpar.doc_and_unit += ' ' + line.strip()
     
     @staticmethod
     def __stringIsEmptyLine(s):
@@ -245,7 +257,11 @@ class ComponentParser(object):
         result = ''        
         text_lns = list(iter(text.splitlines()))
         for l in text_lns:
-            l = l.lstrip('*')
+            # lstrip '*' if present, otherwise just remove left whitespace
+            if l.startswith('*'):
+                l = l.lstrip('*')
+            else:
+                l = l.lstrip()
             l = l.strip()
             result += '\n'
             result += l
@@ -284,6 +300,10 @@ def read_header(file):
                 break
         elif re.search(r'[ ]*\*\*\*\*', l):
             break
+        else:
+            # line is still in header but not prefixed by * - we tolerate...
+            pass
+
     return ''.join(lines)
 
 class InstrCompHeaderInfo:
@@ -363,7 +383,10 @@ def parse_header(text):
     new_lines = []
     for i in range(len(lines)):
         l = lines[i]
-        new_lines.append(l.strip('*').strip()) # strip spaces then left stars
+        if l.startswith('*'):
+            new_lines.append(l.strip('*').strip()) # strip spaces then left stars
+        else:
+            new_lines.append(l.strip().strip())
     text = '\n'.join(new_lines)
     
     # get tag indices, and deal with cases of missing tags
@@ -417,8 +440,9 @@ def parse_header(text):
       descrlines = []
       # remove all "*:" lines
       for l in m5.group(1).strip().splitlines():
-          if not re.match(r'[^\n]*:', l, flags=re.DOTALL):
-              descrlines.append(l)
+        # PW 2025: Suppressed the : detection, but strip off %INSTRUMENT_SITE and Modified by 
+        if not re.match(r'%INSTRUMENT_SITE:', l, flags=re.DOTALL) and not re.match(r'Modified by:', l, flags=re.DOTALL):
+          descrlines.append(l)
       info.short_descr = '\n'.join(descrlines).strip()
     
     # description
@@ -436,7 +460,8 @@ def parse_header(text):
     # params
     par_doc = None
     for l in bites[tag_P].splitlines():
-        m = re.match(r'(\w+):[ \t]*\[([ \w\/\(\)\\\~\-.,\":\%\^\|\{\};\*]*)\][ \t]*(.*)', l)
+        # regex is tolerant for mising ':' in  param: [unit] description
+        m = re.match(r'(\w+)[: \t]*\[([ \w\/\(\)\\\~\-.,\":\%\^\|\{\};\*\&\#]*)\][ \t]*(.*)', l)
         par_doc = (None, None, None)
         if m:
             par_doc = (m.group(1), m.group(2), m.group(3).strip())
@@ -465,15 +490,16 @@ def read_define_instr(file):
         if not re.match(r'DEFINE[ \t]+INSTRUMENT[ \t]+', l):
             continue
         else:
-            lines.append(l.strip())
+            lines.append(re.sub(r'//.*', '', l.strip()))
             break
     
     if len(lines) > 0 and not re.search(r'\)', lines[-1]):
         for l in file:
-            lines.append(l.strip())
+            lines.append(re.sub(r'//.*', '', l.strip()))
             if re.search(r'\)', l):
                 break
-    
+    if not lines[-1] == ')':
+        lines.append(')')
     return ' '.join(lines)
 
 def read_define_comp(file):
@@ -604,7 +630,7 @@ def parse_params(params_line):
             dval = '"' + m.group(2) + '"'
             name = m.group(1).strip()
         elif re.search(r'=', part):
-            m = re.match("(.*)=(.*)", part)
+            m = re.match(r'(.*)\s*=\s*(.*)', part)
             dval = m.group(2).strip()
             name = m.group(1).strip()
         else:
@@ -619,7 +645,7 @@ def parse_define_instr(text):
     Not robust to "junk" in the input string.
     '''
     try:
-        m = re.match(r'DEFINE[ \t]+INSTRUMENT[ \t]+(\w+)\s*\(([\w\,\"\s\n\t\r\.\+:;\-=]*)\)', text)
+        m = re.match(r'DEFINE[ \t]+INSTRUMENT[ \t]+(\w+)\s*\(([\w\,\"\s\n\t\r\.\+:;\-=/]*)\)+', text)
         name = m.group(1)
         params = m.group(2).replace('\n', '').strip()
     except:
@@ -665,11 +691,12 @@ def get_instr_site(instr_file):
         
     return site
 
-def get_instr_comp_files(mydir, recursive=True, instrfilter=None, compfilter=None):
+def get_instr_comp_files(mydir, recursive=True, instrfilter=None, withcomp=None, compfilter=None):
     ''' returns list of filename with path of all .instr and .comp recursively from dir "mydir"
 
     181211: added recursive, defaults to True to preserve backwards compatibility
     191114: added instrfilter and compfilter, which filters results based on filename (before the dot)
+    061225: added withcomp, for filtering instruments using a certain comp
     '''
     instrreg = None
     compreg = None
@@ -689,9 +716,17 @@ def get_instr_comp_files(mydir, recursive=True, instrfilter=None, compfilter=Non
                     for filter in filters:
                         instrreg = re.compile(filter)
                         if instrreg.search(join(dirpath,f), re.IGNORECASE):
-                            files_instr.append(join(dirpath, f))
+                            if withcomp is not None:
+                                if withcomp in Path(join(dirpath, f)).read_text(encoding="utf8"):
+                                    files_instr.append(join(dirpath, f))
+                            else:
+                                files_instr.append(join(dirpath, f))
                 else:
-                    files_instr.append(join(dirpath, f))
+                    if withcomp is not None:
+                        if withcomp in Path(join(dirpath, f)).read_text(encoding="utf8"):
+                            files_instr.append(join(dirpath, f))
+                    else:
+                        files_instr.append(join(dirpath, f))
 
             # get comp files
             if os.path.splitext(f)[1] == '.comp':
@@ -740,24 +775,139 @@ def get_file_contents(filepath):
     else:
         return ''
 
-def run_subtool_noread(cmd, cwd=None):
-    ''' run subtool to completion in a excessive pipe-output robust way (millions of lines) '''
+try:
+    import psutil
+except ImportError:
+    psutil = None
+
+def _kill_process_tree(pid, timeout=3.0):
+    """Kill process tree rooted at pid. Uses psutil if available, otherwise best-effort."""
+    if psutil:
+        try:
+            parent = psutil.Process(pid)
+        except psutil.NoSuchProcess:
+            return
+        children = parent.children(recursive=True)
+        # send sig to children first
+        for p in children:
+            try:
+                p.send_signal(signal.SIGKILL)
+            except Exception:
+                try:
+                    p.kill()
+                except Exception:
+                    pass
+        # then parent
+        try:
+            parent.send_signal(sig)
+        except Exception:
+            try:
+                parent.kill()
+            except Exception:
+                pass
+        # wait up to timeout for processes to disappear
+        gone, alive = psutil.wait_procs([parent] + children, timeout=timeout)
+        return alive
+    else:
+        # Fallback: on Unix killpg, on Windows try proc.kill
+        if sys.platform == "win32":
+            try:
+                os.kill(pid, signal.SIGTERM)
+            except Exception:
+                try:
+                    os.kill(pid, signal.SIGKILL)
+                except Exception:
+                    pass
+        else:
+            try:
+                os.killpg(os.getpgid(pid), signal.SIGTERM)
+            except Exception:
+                try:
+                    os.kill(pid, signal.SIGTERM)
+                except Exception:
+                    pass
+        # no reliable wait for children without psutil
+        return []
+
+def run_subtool_noread(cmd, cwd=None, timeout=None, kill_timeout=3.0):
+    """Run external command without reading output; kill whole process group on timeout.
+    Returns (returncode, timed_out: bool).
+    """
+
     if not cwd:
         cwd = os.getcwd()
+
+    # Platform-specific flags
+    if sys.platform == "win32":
+        creationflags = subprocess.CREATE_NEW_PROCESS_GROUP
+        preexec_fn = None
+    else:
+        creationflags = 0
+        preexec_fn = os.setpgrp  # start new session -> new process group
+
     try:
-        process = subprocess.Popen(cmd,
-                                   stdout=subprocess.PIPE,
-                                   stderr=subprocess.PIPE,
-                                   stdin=subprocess.PIPE,
-                                   shell=True,
-                                   universal_newlines=True,
-                                   cwd=cwd)
-        process.communicate()
-        return process.returncode
+        proc = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            stdin=subprocess.PIPE,
+            shell=True,
+            universal_newlines=True,
+            cwd=cwd,
+            preexec_fn=preexec_fn,
+            creationflags=creationflags,
+        )
+
+        try:
+            proc.communicate(timeout=timeout)
+            return proc.returncode, False
+        except subprocess.TimeoutExpired:
+            # escalate: try gentle signal first
+            try:
+                if sys.platform == "win32":
+                    try:
+                        proc.send_signal(signal.CTRL_BREAK_EVENT)
+                    except Exception:
+                        proc.terminate()
+                else:
+                    os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+            except Exception:
+                try:
+                    proc.terminate()
+                except Exception:
+                    pass
+
+            # wait a short time
+            try:
+                proc.wait(timeout=kill_timeout)
+            except Exception:
+                # still alive -> force kill whole tree
+                _kill_process_tree(proc.pid, sig=signal.SIGKILL, timeout=kill_timeout)
+                try:
+                    proc.wait(timeout=kill_timeout)
+                except Exception:
+                    pass
+
+            return (proc.returncode if proc.returncode is not None else -1), True
+        finally:
+            # close fds
+            try:
+                proc.stdout.close()
+            except Exception:
+                pass
+            try:
+                proc.stderr.close()
+            except Exception:
+                pass
+            try:
+                proc.stdin.close()
+            except Exception:
+                pass
+
     except Exception as e:
-        ''' unicode read error safe-guard '''
+        # unicode/read error safe-guard
         print("run_subtool_noread (cmd=%s) error: %s" % (cmd, str(e)))
-        return -1
+        return -1, False
 
 def run_subtool_to_completion(cmd, cwd=None, stdout_cb=None, stderr_cb=None):
     '''
@@ -768,6 +918,7 @@ def run_subtool_to_completion(cmd, cwd=None, stdout_cb=None, stderr_cb=None):
         ''' shorthand utility for calling a function if it is defined, and otherwise ignoring it '''
         if fct:
             fct(*args)
+
     if not cwd:
         cwd = os.getcwd()
 

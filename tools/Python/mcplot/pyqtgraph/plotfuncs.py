@@ -27,7 +27,7 @@ def plot(node, i, plt, opts):
     data = node.getdata_idx(i)
 
     if type(data) is Data1D:
-        view_box = plot_Data1D(data, plt, log=opts['log'], legend=opts['legend'], icolormap=opts['icolormap'],
+        view_box = plot_Data1D(data, plt, fromzero=opts['fromzero'], log=opts['log'], legend=opts['legend'], icolormap=opts['icolormap'],
                                verbose=opts['verbose'], fontsize=opts['fontsize'])
         return view_box, plt
     elif type(data) is Data2D:
@@ -74,11 +74,11 @@ class ModLegend(pg.LegendItem):
 
 def plot_Data0D(data, plt, log=False, legend=True, icolormap=0, verbose=True, fontsize=10):
     ''' creates an empty plot '''
-    plt.setTitle("zero-dim monitor")
+    plt.setTitle(data.title)
     return plt.getViewBox()
 
 
-def plot_Data1D(data, plt, log=False, legend=True, icolormap=0, verbose=True, fontsize=10):
+def plot_Data1D(data, plt, log=False, fromzero=False, legend=True, icolormap=0, verbose=True, fontsize=10):
     ''' create a plotItem and populate it with data, Data1D '''
     # data
     x = np.array(data.xvals).astype(float)
@@ -100,6 +100,9 @@ def plot_Data1D(data, plt, log=False, legend=True, icolormap=0, verbose=True, fo
             plt.setLogMode(y=False)
     else:
         plt.setLogMode(y=False)
+        if fromzero:
+            yp=np.append(y,0)
+            plt.setYRange(np.min(yp), np.max(y), padding=0)
 
     plt.setXRange(np.min(x), np.max(x), padding=0)
 

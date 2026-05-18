@@ -38,7 +38,6 @@
 //  by the last Union_master.
 
 
-
 // Initialize global positions / rotations to transform lists
   // These are lists of pointers to positons / rotations, that will be updated from global frame
   //  to the frame of the master component that uses them in that masters initialize section.
@@ -52,6 +51,10 @@
 // Initialize global_material_list
   // Used to facilitate communication between materials and the other types of Union components
   struct pointer_to_global_material_list global_material_list = {0,NULL};
+  
+// Initialize global_surface_list
+  // Used to facilitate communication between surface components and other types of Union components
+  struct pointer_to_global_surface_list global_surface_list = {0,NULL};
 
 // Initialize global_geometry_list
   // Used to facilitate communication between geometries and the other types of Union components

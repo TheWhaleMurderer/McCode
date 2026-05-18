@@ -16,6 +16,7 @@ import pathlib
 import shutil
 import platform
 import subprocess
+import io
 
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 from mccodelib import utils, mccode_config
@@ -66,6 +67,7 @@ class InstrExampleTest:
 
         self.linted = None
         self.compiled = None
+        self.displayed = None
         self.compiletime = None
         self.didrun = None
         self.runtime = None
@@ -87,13 +89,40 @@ class InstrExampleTest:
             "linted"       : self.linted,
             "compiled"     : self.compiled,
             "compiletime"  : self.compiletime,
+            "displayed"    : self.displayed,
             "didrun"       : self.didrun,
             "runtime"      : self.runtime,
             "errmsg"       : self.errmsg,
         }
     def save(self, infolder):
-        text = json.dumps(self.get_json_repr())
+        text = json.dumps(self.get_json_repr(), indent=2)
         f = open(join(infolder, self.get_display_name()) + ".json", 'w').write(text)
+    def load(self,testnb=0):
+        jsonfile=pathlib.Path(os.path.join(os.path.dirname(self.localfile),self.get_display_name()+'.json'))
+        if jsonfile.is_file():
+            f = open(jsonfile, "r", encoding="utf-8")
+            obj = json.load(f)
+            # # Populate test
+            self.displayname=obj['displayname']
+            self.sourcefile=obj['sourcefile']
+            self.localfile=obj['localfile']
+            self.instrname=obj['instrname']
+            self.testnb=obj['testnb']
+            self.parvals=obj['parvals']
+            self.detector=obj['detector']
+            self.targetval=obj['targetval']
+            self.testval=obj['testval']
+            self.linted=obj['linted']
+            self.compiled=obj['compiled']
+            self.compiletime=obj['compiletime']
+            self.displayed=obj['displayed']
+            self.didrun=obj['didrun']
+            self.runtime=obj['runtime']
+            self.errmsg=obj['errmsg']
+            return True
+        else:
+            return False
+
     def get_display_name(self):
         if self.testnb > 1:
             return self.instrname + "_%d" % self.testnb
@@ -170,12 +199,47 @@ def extract_testvals(datafolder, monitorname):
                 return (I, I_err, N)
                 break
 
-def mccode_test(branchdir, testdir, limitinstrs=None, instrfilter=None, version=None):
-    ''' this main test function tests the given mccode branch/version '''
+def parse_detector_I_value(resfile_path, detector_name):
+    """
+    Return (value_float, success_bool, raw_value_str_or_None).
+    value_float is the parsed float (or -1.0 on failure).
+    success_bool is True when a value was parsed successfully.
+    raw_value_str_or_None is the string extracted (before conversion) or None.
+    """
+    prefix = f"Detector: {detector_name}_I="
+    try:
+        with open(resfile_path, "r", encoding="utf-8", errors="replace") as f:
+            for line in f:
+                if line.startswith(prefix):
+                    # extract after first '=' then take up to first whitespace
+                    # matches the shell pipeline: cut -f2 -d= | cut -f1 -d' '
+                    _, _, after_eq = line.partition("=")
+                    raw = after_eq.split()[0] if after_eq else ""
+                    if raw == "":
+                        return -1.0, False, None
+                    try:
+                        return float(raw), True, raw
+                    except ValueError:
+                        return -1.0, False, raw
+        return -1.0, False, None
+    except FileNotFoundError:
+        return -1.0, False, None
+    except OSError:
+        return -1.0, False, None
 
+def mccode_test(branchdir, testdir, limitinstrs=None, instrfilter=None, compfilter=None, version=None):
+    ''' this main test function tests the given mccode branch/version '''
+    skipped=False
+    global runLocal
     # copy instr files and record info
-    logging.info("Finding instruments in: %s" % str(pathlib.Path(branchdir,"examples").resolve()))
-    instrs, _ = utils.get_instr_comp_files(str(pathlib.Path(branchdir,"examples").resolve()), recursive=True, instrfilter=instrfilter)
+    if not runLocal:
+        logging.info("Finding instruments in: %s" % str(pathlib.Path(branchdir,"examples").resolve()))
+        instrs, _ = utils.get_instr_comp_files(str(pathlib.Path(branchdir,"examples").resolve()), recursive=True, instrfilter=instrfilter, withcomp=compfilter)
+    else:
+        logging.info("Adding instruments from subfolders in: %s" % str(pathlib.Path(".").resolve()))
+        instrs, _ = utils.get_instr_comp_files(str(pathlib.Path(runLocal).resolve()), recursive=True, instrfilter=instrfilter, withcomp=compfilter)
+    if compfilter is not None:
+        logging.info("(Instrument list filtered by those using component %s )" % compfilter)
     instrs.sort()
 
     # limt runs if required
@@ -196,17 +260,14 @@ def mccode_test(branchdir, testdir, limitinstrs=None, instrfilter=None, version=
         # copy the test folder for this instrument
         instrname = splitext(basename(f))[0]
         instrdir = join(testdir, instrname)
-
+        
+        # Read instr file content to look for tests
+        text = open(f, encoding='utf-8').read()
+        f_new=join(instrdir,os.path.basename(f))
+        # create a test object for every test defined in the instrument header
+        instrtests = create_instr_test_objs(sourcefile=f, localfile=f_new, header=text)
         try:
             shutil.copytree(os.path.dirname(f),instrdir)
-
-            f_new=join(instrdir,os.path.basename(f))
-
-            # Read instr file content to look for tests
-            text = open(f, encoding='utf-8').read()
-
-            # create a test object for every test defined in the instrument header
-            instrtests = create_instr_test_objs(sourcefile=f, localfile=f_new, header=text)
             tests = tests + instrtests
 
             # extract and record %Example info from text
@@ -221,11 +282,19 @@ def mccode_test(branchdir, testdir, limitinstrs=None, instrfilter=None, version=
                 formatstr = "%-" + "%ds: TESTS (%d)" % (maxnamelen, numtests)
                 logging.debug(formatstr % instrname)
         except:
+            print("\nWARNING: Skipped " + instrname + " test - did " + instrdir + " exist already??\n")
+            skipped=True
+            populated=[]
+            for t in instrtests:
+                if t.testnb >= 0:
+                    if t.load(t.testnb)==True:
+                        populated.append(t)
+            tests = tests + populated
             pass
 
 
     # compile, record time
-    global ncount, mpi, openacc, suffix, nexus, lint
+    global ncount, mpi, openacc, suffix, nexus, lint, permissive, compilemax, runmax
     logging.info("")
     if not lint:
         logging.info("Compiling instruments [seconds]...")
@@ -264,7 +333,7 @@ def mccode_test(branchdir, testdir, limitinstrs=None, instrfilter=None, version=
                         cmd = cmd + " --mpi=1 "
                     cmd = cmd + " --verbose -c -n0 %s > compile_stdout.txt 2>&1" % test.instrname
 
-                utils.run_subtool_noread(cmd, cwd=join(testdir, test.instrname))
+                utils.run_subtool_noread(cmd, cwd=join(testdir, test.instrname), timeout=compilemax)
                 t2 = time.time()
                 test.compiled = os.path.exists(binfile)
                 test.compiletime = t2 - t1
@@ -274,6 +343,16 @@ def mccode_test(branchdir, testdir, limitinstrs=None, instrfilter=None, version=
                     formatstr = "%-" + "%ds: " % maxnamelen + \
                       "{:3d}.".format(math.floor(test.compiletime)) + str(test.compiletime-int(test.compiletime)).split('.')[1][:2]
                     logging.info(formatstr % test.get_display_name())
+                    # Run mcdisplay (single particle only)
+                    if test.testnb>0:
+                        cmd = mccode_config.configuration["MCDISPLAY"]+'-classic --nobrowse %s %s -n0 -d display > displaylog.txt 2>&1' % (test.instrname+'.instr', test.parvals)
+                    else:
+                        cmd = mccode_config.configuration["MCDISPLAY"]+'-classic --nobrowse %s -y -n0 -d display > displaylog.txt 2>&1' % (test.instrname+'.instr')
+                    retcode = utils.run_subtool_noread(cmd, cwd=join(testdir, test.instrname), timeout=compilemax)
+                    if retcode[0]==0:
+                        test.displayed = True
+                    else:
+                        test.displayed = False
                 else:
                     if lint:
                         formatstr = "%-" + "%ds: Linted using using:\n" % maxnamelen
@@ -290,8 +369,10 @@ def mccode_test(branchdir, testdir, limitinstrs=None, instrfilter=None, version=
                         f.close()
             else:
                 logging.info("Skipping compile of " + test.instrname)
+                skipped=True
         # save (incomplete) test results to disk
-        test.save(infolder=join(testdir, test.instrname))
+        if not skipped:
+            test.save(infolder=join(testdir, test.instrname))
 
     # run, record time
     logging.info("")
@@ -307,7 +388,14 @@ def mccode_test(branchdir, testdir, limitinstrs=None, instrfilter=None, version=
             failed=True
             logging.info(formatstr % test.instrname)
             continue
-        
+        if test.testnb <= 1:
+            if test.displayed:
+                formatstr = "%-" + "%ds:   Display OK" % (maxnamelen+1)
+                logging.info(formatstr % test.instrname)
+            else:
+                formatstr = "%-" + "%ds:   Display FAILED" % (maxnamelen+1)
+                logging.info(formatstr % test.instrname)
+
         # runable tests have testnb > 0
         if test.testnb <= 0:
             formatstr = "%-" + "%ds:   NO TEST" % (maxnamelen+1)
@@ -317,39 +405,45 @@ def mccode_test(branchdir, testdir, limitinstrs=None, instrfilter=None, version=
         # run the test, record time and runtime success/fail
         t1 = time.time()
         cmd = mccode_config.configuration["MCRUN"]
-        if nexus:
-            cmd = cmd + " --format=NeXus "
-        if mpi is not None:
-            if openacc is True:
-                if version:
-                    cmd = cmd + " --override-config=" + join(os.path.dirname(__file__), mccode_config.configuration["MCCODE"] + "-test",version)
-                cmd = cmd + " -s 1000 %s %s -n%s --openacc --mpi=%s -d%d > run_stdout_%d.txt 2>&1" % (test.instrname, test.parvals, ncount, mpi, test.testnb, test.testnb)
+
+        suffix=""
+        # Did test run already?
+        if not os.path.exists(join(testdir, test.instrname, str(test.testnb))):      
+            if nexus:
+                cmd = cmd + " --format=NeXus "
+            if mpi is not None:
+                if openacc is True:
+                    if version:
+                        cmd = cmd + " --override-config=" + join(os.path.dirname(__file__), mccode_config.configuration["MCCODE"] + "-test",version)
+                    cmd = cmd + " -s 1000 %s %s -n%s --openacc --mpi=%s -d%d > run_stdout_%d.txt 2>&1" % (test.instrname, test.parvals, ncount, mpi, test.testnb, test.testnb)
+                else:
+                    if version:
+                        cmd = cmd + " --override-config=" + join(os.path.dirname(__file__), mccode_config.configuration["MCCODE"] + "-test",version)
+                    cmd = cmd + " -s 1000 %s %s -n%s --mpi=%s -d%d > run_stdout_%d.txt 2>&1" % (test.instrname, test.parvals, ncount, mpi, test.testnb, test.testnb)
             else:
                 if version:
                     cmd = cmd + " --override-config=" + join(os.path.dirname(__file__), mccode_config.configuration["MCCODE"] + "-test",version)
-                cmd = cmd + " -s 1000 %s %s -n%s --mpi=%s -d%d > run_stdout_%d.txt 2>&1" % (test.instrname, test.parvals, ncount, mpi, test.testnb, test.testnb)
+                cmd = cmd + " -s 1000 %s %s -n%s -d%d > run_stdout_%d.txt 2>&1" % (test.instrname, test.parvals, ncount, test.testnb, test.testnb)
+
+            retcode = utils.run_subtool_noread(cmd, cwd=join(testdir, test.instrname),timeout=runmax)
+            t2 = time.time()
+            didwrite = os.path.exists(join(testdir, test.instrname, str(test.testnb), "mccode.sim"))
+            didwrite_nexus = os.path.exists(join(testdir, test.instrname, str(test.testnb), "mccode.h5"))
+            test.didrun = retcode != 0 or didwrite or didwrite_nexus
+            test.runtime = t2 - t1
         else:
-            if version:
-                cmd = cmd + " --override-config=" + join(os.path.dirname(__file__), mccode_config.configuration["MCCODE"] + "-test",version)
-            cmd = cmd + " -s 1000 %s %s -n%s -d%d > run_stdout_%d.txt 2>&1" % (test.instrname, test.parvals, ncount, test.testnb, test.testnb)
-        retcode = utils.run_subtool_noread(cmd, cwd=join(testdir, test.instrname))
-        t2 = time.time()
-        didwrite = os.path.exists(join(testdir, test.instrname, str(test.testnb), "mccode.sim"))
-        didwrite_nexus = os.path.exists(join(testdir, test.instrname, str(test.testnb), "mccode.h5"))
-        test.didrun = retcode != 0 or didwrite or didwrite_nexus
-        test.runtime = t2 - t1
+            suffix=" (cached)"
+            didwrite = os.path.exists(join(testdir, test.instrname, str(test.testnb), "mccode.sim"))
+            didwrite_nexus = os.path.exists(join(testdir, test.instrname, str(test.testnb), "mccode.h5"))
 
         # log to terminal
-        if test.didrun:
-            formatstr = "%-" + "%ds: " % (maxnamelen+1) + \
-                "{:3d}.".format(math.floor(test.runtime)) + str(test.runtime-int(test.runtime)).split('.')[1][:2]
-            logging.info(formatstr % test.get_display_name())
-        else:
+        if not test.didrun:
             formatstr = "%-" + "%ds: RUNTIME ERROR" % (maxnamelen+1)
             logging.info(formatstr % instrname + ", " + cmd)
             failed=True
             continue
 
+        resbase="(No file)"
         # test value extraction
         if not didwrite_nexus:
             extraction = extract_testvals(join(testdir, test.instrname, str(test.testnb)), test.detector)
@@ -358,20 +452,41 @@ def mccode_test(branchdir, testdir, limitinstrs=None, instrfilter=None, version=
             else:
                 test.testval = -1
                 failed=True
+            resbase ="run_stdout_%d.txt" % (test.testnb)
+            resfile = join(testdir,test.instrname,resbase)
         # Look for detector output in run_stdout
         else:
             metalog = LineLogger()
-            resfile = join(testdir,test.instrname,"run_stdout_%d.txt" % (test.testnb))
-            cmd = r"grep %s_I= %s | head -1 | cut -f2- -d= | cut -f1 -d\ " %(test.detector, resfile)
-            utils.run_subtool_to_completion(cmd, stdout_cb=metalog.logline)
-            try:
-                test.testval=float(metalog.lst[0])
-            except:
+            resbase ="run_stdout_%d.txt" % (test.testnb)
+            resfile = join(testdir,test.instrname,resbase)
+            val, ok, raw = parse_detector_I_value(resfile, test.detector)
+            if ok:
+                test.testval = val
+            else:
                 test.testval=-1
                 failed=True
+
+        percent=0
+        if test.didrun:
+            if failed:
+                suffix += " + !! RUNTIME FAILURE - see %s !! " % (resbase)
+            formatstr = "%-" + "%ds: " % (maxnamelen+1) + \
+                "{:3d}.".format(math.floor(test.runtime)) + str(test.runtime-int(test.runtime)).split('.')[1][:2]
+            if test.targetval!=0: # Normal situation, non-zero target value
+                percent=round(100.0*test.testval/test.targetval)
+                if percent<80 or percent>120:
+                    suffix += " <--- BIG DISCREPANCY??"
+                logging.info(formatstr % test.get_display_name() + "    [val: " + str(test.testval) + " / " + str(test.targetval) + " = " + str(percent) + " %]" + suffix)
+            else:                 # Special case, expected test target value is 0
+                logging.info(formatstr % test.get_display_name() + "    [val: " + str(test.testval) + " vs " + str(test.targetval) + " (absolute vs 0) ]" + suffix)
+        else:
+            logging.info((formatstr % test.get_display_name()) + (" !! [TEST INDICATES RUNTIME ERROR - see %s  + suffix ] !!" % (resbase)))
+        suffix=""
+        failed=False
         # save test result to disk
         test.testcomplete = True
-        test.save(infolder=join(testdir, test.instrname))
+        if not skipped:
+            test.save(infolder=join(testdir, test.instrname))
 
     #    cpu type: cat /proc/cpuinfo |grep name |uniq | cut -f2- -d: 
     #    gpu type: nvidia-smi -L | head -1 |cut -f2- -d: |cut -f1 -d\(
@@ -452,13 +567,13 @@ def create_label_dir(testdir, label):
 
 def create_datetime_testdir(testroot):
     datetime = utils.get_datetimestr()
-    return create_label_dir(testroot, datetime)
+    return create_label_dir(testroot + "_" + datetime, "")
 
 #
 # Program functions for every main test mode
 #
 
-def run_default_test(testdir, mccoderoot, limit, instrfilter, suffix):
+def run_default_test(testdir, mccoderoot, limit, instrfilter, compfilter, suffix):
     ''' tests the default mccode version '''
 
     # get default/system version number
@@ -475,7 +590,8 @@ def run_default_test(testdir, mccoderoot, limit, instrfilter, suffix):
 
     logging.info("Testing: %s" % version)
     logging.info("")
-    results, failed = mccode_test(mccoderoot, labeldir, limit, instrfilter)
+
+    results, failed = mccode_test(mccoderoot, labeldir, limit, instrfilter, compfilter)
     
     reportfile = os.path.join(labeldir, "testresults_%s.json" % (mccode_config.configuration["MCCODE"]+"-"+version+suffix))
     open(os.path.join(reportfile), "w").write(json.dumps(results, indent=2))
@@ -485,12 +601,15 @@ def run_default_test(testdir, mccoderoot, limit, instrfilter, suffix):
     print("======================================")
     print("Overall test result:")
     if (failed):
-        print("FAILED! One or more tests errored")
-        exit(-1)
+        if (not permissive):
+            print("FAILED! One or more tests errored")
+            exit(-1)
+        else:
+            print("Failures reported but tool was run in permissive mode.")
     else:
         print("SUCCESS")
 
-def run_version_test(testdir, mccoderoot, limit, instrfilter, version, suffix):
+def run_version_test(testdir, mccoderoot, limit, instrfilter, compfilter, version, suffix):
     ''' as run_default_test, but activates/deactivates and ses a specific mccode version if it exists '''
 
     # verify that version exists
@@ -506,7 +625,7 @@ def run_version_test(testdir, mccoderoot, limit, instrfilter, version, suffix):
         logging.info("Testing: %s" % version)
         logging.info("")
 
-        results, failed = mccode_test(mccoderoot, labeldir, limit, instrfilter, version)
+        results, failed = mccode_test(mccoderoot, labeldir, limit, instrfilter, compfilter, version)
     finally:
         deactivate_mccode_version(oldpath)
 
@@ -517,7 +636,7 @@ def run_version_test(testdir, mccoderoot, limit, instrfilter, version, suffix):
     logging.debug("Test results written to: %s" % reportfile)
 
 
-def run_config_test(testdir, mccoderoot, limit, configfilter, instrfilter, suffix):
+def run_config_test(testdir, mccoderoot, limit, configfilter, instrfilter, compfilter, suffix):
     '''
     Test a suite of configs, each a mccode_config_LABEL.py file, that is copied to the dist dir
     prior to starting the test. This action modifies the C-flags and the compiler used during
@@ -575,7 +694,7 @@ def run_config_test(testdir, mccoderoot, limit, configfilter, instrfilter, suffi
 
                 # craete the proper test dir
                 labeldir = create_label_dir(testdir, label)
-                results, failed = mccode_test(mccoderoot, labeldir, limit, instrfilter, label0)
+                results, failed = mccode_test(mccoderoot, labeldir, limit, instrfilter, compfilter, label0)
 
                 # write local test result
                 reportfile = os.path.join(labeldir, "testresults_%s.json" % (os.path.basename(labeldir)))
@@ -589,47 +708,6 @@ def run_config_test(testdir, mccoderoot, limit, configfilter, instrfilter, suffi
             deactivate_mccode_version(oldpath)
 
 
-def show_installed_versions(mccoderoot):
-    ''' utility function, prints identified mccode versions to console '''
-
-    def print_to_console(str):
-        ''' used with popen wrapper '''
-        logging.info(str)
-
-    logging.info("Test environment mode, using output of 'mcstas --vesion'")
-    logging.info("")
-
-    dirnames = []
-    branchnames = []
-    for (_, dirnames, _) in os.walk(mccoderoot):
-        break
-    for d in dirnames:
-        for (_, _, files) in os.walk(join(mccoderoot, d)):
-            break
-        if "environment" in files:
-            branchnames.append(d)
-
-    for v in branchnames:
-        # test environment
-        branchdir = join(mccoderoot, v)
-    
-        os.environ["MCSTAS"] = branchdir
-        oldpath = os.environ["PATH"]
-        os.environ["PATH"] = "%s/miniconda3/bin:%s/bin:%s" % (branchdir, branchdir, oldpath)
-    
-        # run the mcstas --version command
-        cmd = "mcstas --version"
-        utils.run_subtool_to_completion(cmd, stdout_cb=print_to_console, stderr_cb=print_to_console)
-        logging.info("")
-    
-        # TODO: should we test the existence of m[xc]run?
-    
-        # restore environment
-        del os.environ["MCSTAS"]
-        os.environ["PATH"] = oldpath
-
-    logging.info("Selectable version names are: %s" % ", ".join(branchnames))
-    logging.info("")
 
 ncount = None
 mpi = None
@@ -637,24 +715,23 @@ openacc = None
 suffix = None
 nexus = None
 lint = None
+permissive = None
+runLocal = None
+runmax = None
+compilemax = None
 
 def main(args):
     # mutually excusive main branches
     default = None                  # test system mccode version as-is
-    version = args.testversion      # test a specific mccode version (also) present on the system
-    configs = False
     configfilter = args.config      # test only config matching this label
-    if configfilter:
-        configs = True
-    vinfo = args.versions           # display mccode versions installed on the system
 
     # modifying options
     verbose = args.verbose          # display more info during runs
-    testroot = args.testroot        # use non-default test output root location
-    testdir = args.testdir          # use non-default test output location (overrides testroot)
+    testdir = args.testdir          # use non-default test output location
     mccoderoot = args.mccoderoot    # use non-default mccode system install location
     limit = args.limit              # only test the first [limit] instruments (useful for debugging purposes)
     instrfilter = args.instr        # test only matching instrs
+    compfilter = args.comp          # test only instrs including comp
     suffix=""
 
     # set modifications first
@@ -662,10 +739,10 @@ def main(args):
         logging.basicConfig(level=logging.DEBUG, format="%(message)s")
     else:
         logging.basicConfig(level=logging.INFO, format="%(message)s")
+
     if not testdir:
-        if not testroot:
-            testroot = os.path.join(os.getcwd(),mccode_config.configuration["MCCODE"]+"-test")
-            testdir = create_datetime_testdir(testroot)
+        testdir='.'
+
     logging.info("Output of test will be placed in: %s" % testdir)
 
     if not mccoderoot:
@@ -699,23 +776,34 @@ def main(args):
             quit(1)
     logging.debug("")
 
-    global ncount, mpi, skipnontest, openacc, nexus, lint
+    global ncount, mpi, skipnontest, openacc, nexus, lint, permissive, runLocal, compilemax, runmax
+    ncount = "1e6"
     if args.ncount:
         ncount = args.ncount[0]
     elif args.n:
         ncount = args.n[0]
-    else:
-        ncount = "1e6"
-    suffix = '_' + ncount
+
+    if args.local:
+        runLocal = args.local
 
     if instrfilter:
         isuffix=instrfilter.replace(',', '_')
         suffix = '_' + isuffix
 
-    if args.suffix:
-        suffix = '_' + args.suffix[0]
+    if compfilter:
+        compfilter=str(compfilter[0])
+        suffix = suffix + '_' + compfilter
 
-    suffix=suffix + "_" + platform.system()
+    if args.suffix:
+        if (len(suffix)<30):
+            suffix = suffix + '_' + args.suffix[0]
+        else:
+            suffix = '_' + args.suffix[0]
+
+    suffix=suffix + "_" + ncount + "_" + platform.system() + "_" + utils.get_datetimestr()
+    if runLocal:
+        suffix = suffix + '_LOCAL'
+
     logging.info("ncount is: %s" % ncount)
     if args.mpi:
         mpi = args.mpi[0]
@@ -733,40 +821,46 @@ def main(args):
         lint = True
         suffix = '_lint' + suffix
         logging.info("c-linting enabled")
-    # decide and run main branch
-    if version and configs or version and vinfo or configs and vinfo:
-        print("WARNING: version, --configs and --versions are mutually exclusive, exiting")
-        quit()
-    default = not version and not configs and not vinfo
-    if default:
-        run_default_test(testdir, mccoderoot, limit, instrfilter, suffix)
-    elif version:
-        run_version_test(testdir, mccoderoot, limit, instrfilter, version, suffix)
-    elif configs:
-        run_config_test(testdir, mccoderoot, limit, configfilter, instrfilter, suffix)
-    elif vinfo:
-        show_installed_versions(mccoderoot)
+    if args.runmax:
+        runmax=int(args.runmax[0])
+    else:
+        runmax=3600
+    if args.compilemax:
+        compilemax=int(args.compilemax[0])
+        if lint:
+            compilemax=100*compilemax
+    else:
+        compilemax=600
+    if args.permissive:
+        permissive = True
+        logging.info("Permissive mode, tool will not report failure on failed instruments")
 
+    if not configfilter:
+        run_default_test(testdir, mccoderoot, limit, instrfilter, compfilter, suffix)
+    else:
+        run_config_test(testdir, mccoderoot, limit, configfilter, compfilter, instrfilter, suffix)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('testversion', nargs="?", help='mccode version to test')
     parser.add_argument('--ncount', nargs=1, help='ncount sent to %s' % (mccode_config.configuration["MCRUN"]) )
     parser.add_argument('-n', nargs=1, help='ncount sent to %s' % (mccode_config.configuration["MCRUN"]) )
     parser.add_argument('--mpi', nargs=1, help='mpi nodecount sent to %s' % (mccode_config.configuration["MCRUN"]) )
     parser.add_argument('--openacc', action='store_true', help='openacc flag sent to %s' % (mccode_config.configuration["MCRUN"]))
     parser.add_argument('--config', nargs="?", help='test this specific config only - label name or absolute path')
     parser.add_argument('--instr', nargs="?", help='test only intruments matching this filter (py regex). Comma-separated list allowed for multiple filters.')
+    parser.add_argument('--comp', nargs=1, help='test only intruments utilising COMP. Useful for testing the instrument suite after component changes.')
     parser.add_argument('--mccoderoot', nargs='?', help='manually select root search folder for mccode installations')
-    parser.add_argument('--testroot', nargs='?', help='output test results in a datetime folder in this root')
-    parser.add_argument('--testdir', nargs='?', help='output test results directly in this dir (overrides testroot)')
-    parser.add_argument('--limit', nargs=1, help='test only the first [LIMIT] instrs in every version')
-    parser.add_argument('--versions', action='store_true', help='display local versions info')
+    parser.add_argument('--testdir', nargs='?', help='output test results directly in this dir (default CWD)')
+    parser.add_argument('--limit', nargs=1, help='test only the first [LIMIT] instrs')
     parser.add_argument('--verbose', action='store_true', help='output a test/notest instrument status header before each test')
     parser.add_argument('--skipnontest', action='store_true', help='Skip compilation of instruments without a test')
     parser.add_argument('--suffix', nargs=1, help='Add suffix to test directory name, e.g. 3.x-dev_suffix')
     parser.add_argument('--nexus', action='store_true', help='Compile for / use NeXus output format everywhere')
     parser.add_argument('--lint', action='store_true', help='Just run the c-linter')
+    parser.add_argument('--compilemax', nargs=1, help='Maximum time (s) allowed pr. compilation (x100 with --lint)')
+    parser.add_argument('--runmax', nargs=1, help='Maximum time (s) allowed pr. test Example run')
+    parser.add_argument('--permissive', action='store_true', help='Use zero return-value even if some tests fail. Useful for full test con systems that are only partially functional.')
+    parser.add_argument('--local', help='Instruments to test are NOT picked up from MCCODE installation, instead from --local=DIR')
     args = parser.parse_args()
 
     try:
