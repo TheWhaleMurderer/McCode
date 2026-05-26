@@ -1,0 +1,40 @@
+name: mcstas
+channels:
+  - nodefaults
+  - conda-forge
+dependencies:
+  - cmake
+  - c-compiler
+  - cppcheck
+  - clang-format
+  - make
+  - flex
+  - bison
+  - python=3.13
+  - pyaml
+  - numpy
+  - psutil
+  - bash
+  - pyqt >=5
+  - qscintilla2
+  - matplotlib-base
+  - tornado >=5
+  - scipy
+  - pillow
+  - pyqtgraph
+  - qtpy
+  - nodejs
+  - ply
+  - jinja2
+  - mcstasscript
+  - jupytext
+  - jupyterlab
+  - rsync
+  - gsl
+  - libnexus
+  - nexpy
+  - cif2hkl
+  - mcpl-extra >=2.2.8
+  - kdsource
+  - ncrystal >=4.4.2
+  - openmpi =4

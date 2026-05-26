@@ -25,6 +25,7 @@
 * %Parameters
 *
 * Input parameters:
+* reflect: []           Reflectivity vs. Q data from datafile (R should not exceed 1)
 * nshells: [1]          Number of nested shells to expect
 * rmin: [m]             Midoptic plane radius of innermost mirror pair.
 * rmax: [m]             Midoptic plane radius of outermost mirror pair.
@@ -50,7 +51,7 @@
 DEFINE COMPONENT Conics_PH
 
 SETTING PARAMETERS (
-    rmin=0.325,rmax=0.615, focal_length=10.070, lp=0.84, lh=0.84,
+    reflect = "0", rmin=0.325,rmax=0.615, focal_length=10.070, lp=0.84, lh=0.84,
     int nshells=4, m=1, mirr_thick=0, int disk=1, vector radii=NULL,
     R0=0.99, Qc=0.021, W=0.003, alpha=6.07, transmit=0)
 
@@ -58,20 +59,33 @@ SHARE
 %{
     %include "ref-lib"
     %include "conic.h"
-    %include "read_table-lib"
+    %include "read_table-lib.h"
 %}
 
 DECLARE
 %{
   // Scene where all geometry is added to
   Scene s;
+  // Prepare datafile reading
+  t_Table dtable;
 %}
 
 INITIALIZE
 %{
+  /* Initialize geometry */
   ConicSurf* pm;
   double th_c, alpha_p, alpha_h, fp2, dr, rr, cH, theta_1, theta_2, theta_i;
-  int i;
+  int i, has_reflect = 0;
+
+  if (reflect != NULL && strlen(reflect) > 0 &&
+    strcmp(reflect, "0") && strcmp(reflect, "NULL")) {
+    if (Table_Read(&dTable, reflect, 0) > 0) {
+        has_reflect = 1;
+    } else {
+        exit(fprintf(stderr, "Conics_PH: %s: can not read file %s\n",
+                     NAME_CURRENT_COMP, reflect));
+    }
+  }
 
   s = makeScene ();
   /* Mode a, vector of radii */
@@ -84,8 +98,8 @@ INITIALIZE
       alpha_h = 3 * alpha_p;
 
       Point pi = makePoint (0, rr, 0); // f-1);
-      pm = addParaboloid (focal_length, pi, -lp, 0, m, R0, Qc, W, alpha, &s);
-      addHyperboloid (focal_length, focal_length, pi, 0, lh, m, R0, Qc, W, alpha, &s);
+      pm = addParaboloid (focal_length, pi, -lp, 0, m, R0, Qc, W, alpha, reflect, &s);
+      addHyperboloid (focal_length, focal_length, pi, 0, lh, m, R0, Qc, W, alpha, reflect, &s);
     }
   } else {
     /* Mode b, use quadratic law to distribute the shells */
@@ -109,8 +123,8 @@ INITIALIZE
 
       cH = fabs (0.5 * (rr / tan (theta_2 - 2.0 * theta_i) - focal_length));
 
-      pm = addParaboloid (focal_length + 2.0 * cH, pi, -lp, 0, m, R0, Qc, W, alpha, &s);
-      addHyperboloid (focal_length, focal_length + 2.0 * cH, pi, 0, lh, m, R0, Qc, W, alpha, &s);
+      pm = addParaboloid (focal_length + 2.0 * cH, pi, -lp, 0, m, R0, Qc, W, alpha, reflect, &s);
+      addHyperboloid (focal_length, focal_length + 2.0 * cH, pi, 0, lh, m, R0, Qc, W, alpha, reflect, &s);
     }
   }
   if (disk) {

@@ -517,12 +517,24 @@ enum ConicType {
     ELLIP
 };
 
+/*! @ingroup conicgroup
+\brief Structure for containing reflection parameters */
+typedef struct {
+    int has_table;
+    t_Table *dtable;
+    double R0;
+    double Qc;
+    double alpha;
+    double m;
+    double W;
+} ReflecParam;
 
 /*! @ingroup conicgroup
 \brief Structure to contain z-axis symetric conic sections
 
 Contains any geometry that can be expressed as
 @f$ r^2=k_1 + k_2 z + k_3 z^2 @f$
+
 
 @warning Do not directly modify values in this structure directly */
 typedef struct {
@@ -531,19 +543,20 @@ typedef struct {
     double k3; //!< @f$ k_3 @f$ in equation below
     double zs; //!< z-axis position of start of mirror
     double ze; //!< z-axis position of end of mirror
+    ReflecParam reflect; //!< Reflection parameters for segments
     double m;  //!< m value for mirror (1.0 for Nickel)
     double Qc; //!< m value for mirror (0.0219 AA-1 for Nickel substrate)
     double R0; //!< R0 reflectivity for mirror (0.99 for Nickel substrate)
     double alpha; //!< alpha, slope of reflectivity (6.07 AA for m=2 mirror)
     double W;     //!< Width of supermirror cut-off, 0.003 AA-1 for m=2 mirror
-  
+
     //Only for reference
     double f1; //!< z-axis position of first focus
     double f2; //!< z-axis position of second focus, for paraboloid this is unassigned
     double a;  //!< Value of a, specific to geometry type
     double c;  //!< Value of c, for paraboloid this is unassigned
     enum ConicType type; //!< Type of mirror geometry
-
+    
     #if REC_MAX_GA
     double max_ga; //!< Max Grazing Angle of Reflected Neutron (Exists only if REC_MAX_GA)
     double max_ga_z0; //!< Collision point of Max Grazing Neutron (Exists only if REC_MAX_GA)
@@ -902,7 +915,7 @@ double rConic(double z, ConicSurf s) {
 @see ConicSurf
 */
 ConicSurf makeHyperboloid(double f1, double f2, Point p,
-			  double zstart, double zend, double m, double R0, double Qc, double alpha, double W) {
+			  double zstart, double zend, double m, double R0, double Qc, double alpha, double W, ReflecParam reflect) {
     ConicSurf s;
     s.zs = zstart;
     s.ze = zend;
@@ -917,6 +930,7 @@ ConicSurf makeHyperboloid(double f1, double f2, Point p,
     s.k2 = 2*s.k3*(c-f1);
     s.k1 = (s.k3)*(c-f1)*(c-f1)-c*c+a*a;
 
+    s.reflect = reflect;
     s.m = m;
     s.R0 = R0;
     s.Qc = Qc;
@@ -1050,7 +1064,7 @@ FlatSurf makeFlatEllipse(double f1, double f2, Point p, double zstart, double ze
 @see ConicSurf
 */
 ConicSurf makeParaboloid(double f, Point p, double zstart,
-			 double zend, double m, double R0, double Qc, double alpha, double W) {
+			 double zend, double m, double R0, double Qc, double alpha, double W, ReflecParam reflect) {
 
     ConicSurf s;
     s.zs = zstart;
@@ -1062,7 +1076,8 @@ ConicSurf makeParaboloid(double f, Point p, double zstart,
     s.k3 = 0.0;
     s.k2 = 4*a;
     s.k1 = s.k2*(a-f);
-
+    
+    s.reflect = reflect;
     s.m = m;
     s.R0 = R0;
     s.Qc = Qc;
@@ -1155,12 +1170,12 @@ FlatSurf makeFlatparbola(
 @see ConicSurf
 */
 ConicSurf* addParaboloid(double f1, Point p, double zstart, double zend,
-			 double m, double R0, double Qc, double alpha, double W, Scene* s) {
+			 double m, double R0, double Qc, double alpha, double W, ReflecParam reflect, Scene* s) {
     if (s->num_c >= MAX_CONICSURF-1) {
         fprintf(stderr,"TOO MANY CONICSURF IN SCENE");
         exit(-1);
     }
-    s->c[s->num_c] = makeParaboloid(f1,p,zstart,zend,m,R0,Qc,alpha,W);
+    s->c[s->num_c] = makeParaboloid(f1,p,zstart,zend,m,R0,Qc,alpha,W,reflect);
     s->num_c++;
     return &s->c[s->num_c-1];
 }
@@ -1210,12 +1225,12 @@ FlatSurf* addFlatParabola(
 @see ConicSurf
 */
 ConicSurf* addHyperboloid(double f1, double f2, Point p, double zstart,
-    double zend, double m, double R0, double Qc, double alpha, double W, Scene* s) {
+    double zend, double m, double R0, double Qc, double alpha, double W, ReflecParam reflect, Scene* s) {
     if (s->num_c >= MAX_CONICSURF-1) {
         fprintf(stderr,"TOO MANY CONICSURF IN SCENE");
         exit(-1);
     }
-    s->c[s->num_c] = makeHyperboloid(f1,f2,p,zstart,zend,m,R0,Qc,alpha,W);
+    s->c[s->num_c] = makeHyperboloid(f1,f2,p,zstart,zend,m,R0,Qc,alpha,W,reflect);
     s->num_c++;
     return &s->c[s->num_c-1];
 }
@@ -1554,9 +1569,14 @@ double reflectNeutronConic(_class_particle* _particle, ConicSurf s) {
         _particle->vy = _particle->vy-2*vn*n.y; 
         _particle->vz = _particle->vz-2*vn*n.z; 
         double q = V2Q*(-2)*vn/sqrt(pv.x*pv.x + pv.y*pv.y + pv.z*pv.z);
+        if (s.reflect.has_table && s.reflect.dtable) { /* check if there is a reflectivity table */
+            ref = Table_Value(s.reflect.dtable, q, 1); /* apply the reflectivity data for the given Q-value */
+        }
+        else {
         double par[5] = {s.R0, s.Qc, s.alpha, s.m, s.W};
         StdReflecFunc(q, par, &ref);
 	_particle->p = _particle->p * ref;
+        }
     if (disp>0) {
 		printf("\n pv final = %f, %f, %f",pv.x,pv.y,pv.z);
 	}
@@ -1827,7 +1847,7 @@ void traceSingleNeutron(_class_particle* _particle, Scene s) {
                 traceNeutronDetector(_particle, s.d[index]);
                 break;
             case FLAT:
-	        traceNeutronFlat(_particle, s.f[index]);
+	            traceNeutronFlat(_particle, s.f[index]);
                 break;
             case DISK:
                 traceNeutronDisk(_particle, s.di[index]);
