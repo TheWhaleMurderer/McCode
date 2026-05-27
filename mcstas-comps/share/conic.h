@@ -521,7 +521,7 @@ enum ConicType {
 \brief Structure for containing reflection parameters */
 typedef struct {
     int has_table;
-    t_Table *dtable;
+    t_Table dTable;
     double R0;
     double Qc;
     double alpha;
@@ -1569,8 +1569,8 @@ double reflectNeutronConic(_class_particle* _particle, ConicSurf s) {
         _particle->vy = _particle->vy-2*vn*n.y; 
         _particle->vz = _particle->vz-2*vn*n.z; 
         double q = V2Q*(-2)*vn/sqrt(pv.x*pv.x + pv.y*pv.y + pv.z*pv.z);
-        if (s.reflect.has_table && s.reflect.dtable) { /* check if there is a reflectivity table */
-            ref = Table_Value(s.reflect.dtable, q, 1); /* apply the reflectivity data for the given Q-value */
+        if (s.reflect.has_table) { /* check if there is a reflectivity table */
+            ref = Table_Value(s.reflect.dTable, q, 1); /* apply the reflectivity data for the given Q-value */
         }
         else {
         double par[5] = {s.R0, s.Qc, s.alpha, s.m, s.W};

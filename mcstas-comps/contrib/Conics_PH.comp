@@ -51,7 +51,7 @@
 DEFINE COMPONENT Conics_PH
 
 SETTING PARAMETERS (
-    reflect = "0", rmin=0.325,rmax=0.615, focal_length=10.070, lp=0.84, lh=0.84,
+    string reflect = "0", rmin=0.325,rmax=0.615, focal_length=10.070, lp=0.84, lh=0.84,
     int nshells=4, m=1, mirr_thick=0, int disk=1, vector radii=NULL,
     R0=0.99, Qc=0.021, W=0.003, alpha=6.07, transmit=0)
 
@@ -59,7 +59,7 @@ SHARE
 %{
     %include "ref-lib"
     %include "conic.h"
-    %include "read_table-lib.h"
+    %include "read_table-lib"
 %}
 
 DECLARE
@@ -67,7 +67,7 @@ DECLARE
   // Scene where all geometry is added to
   Scene s;
   // Prepare datafile reading
-  t_Table dtable;
+  ReflecParam Parameters;
 %}
 
 INITIALIZE
@@ -79,8 +79,10 @@ INITIALIZE
 
   if (reflect != NULL && strlen(reflect) > 0 &&
     strcmp(reflect, "0") && strcmp(reflect, "NULL")) {
-    if (Table_Read(&dTable, reflect, 0) > 0) {
+    if (Table_Read(&Parameters.dTable, reflect, 0) > 0) {
         has_reflect = 1;
+	Parameters.has_table=1;
+	//	Parameters.dTable=dTable;
     } else {
         exit(fprintf(stderr, "Conics_PH: %s: can not read file %s\n",
                      NAME_CURRENT_COMP, reflect));
@@ -98,8 +100,8 @@ INITIALIZE
       alpha_h = 3 * alpha_p;
 
       Point pi = makePoint (0, rr, 0); // f-1);
-      pm = addParaboloid (focal_length, pi, -lp, 0, m, R0, Qc, W, alpha, reflect, &s);
-      addHyperboloid (focal_length, focal_length, pi, 0, lh, m, R0, Qc, W, alpha, reflect, &s);
+      pm = addParaboloid (focal_length, pi, -lp, 0, m, R0, Qc, W, alpha, Parameters, &s);
+      addHyperboloid (focal_length, focal_length, pi, 0, lh, m, R0, Qc, W, alpha, Parameters, &s);
     }
   } else {
     /* Mode b, use quadratic law to distribute the shells */
@@ -123,8 +125,8 @@ INITIALIZE
 
       cH = fabs (0.5 * (rr / tan (theta_2 - 2.0 * theta_i) - focal_length));
 
-      pm = addParaboloid (focal_length + 2.0 * cH, pi, -lp, 0, m, R0, Qc, W, alpha, reflect, &s);
-      addHyperboloid (focal_length, focal_length + 2.0 * cH, pi, 0, lh, m, R0, Qc, W, alpha, reflect, &s);
+      pm = addParaboloid (focal_length + 2.0 * cH, pi, -lp, 0, m, R0, Qc, W, alpha, Parameters, &s);
+      addHyperboloid (focal_length, focal_length + 2.0 * cH, pi, 0, lh, m, R0, Qc, W, alpha, Parameters, &s);
     }
   }
   if (disk) {
