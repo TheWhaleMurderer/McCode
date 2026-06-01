@@ -167,6 +167,7 @@ int main() {
 #include <stdio.h>
 #include <stdlib.h>
 
+
 /** @defgroup simgroup Simulator Internals
     Contains items general to the simulation
     @{
@@ -1569,14 +1570,17 @@ double reflectNeutronConic(_class_particle* _particle, ConicSurf s) {
         _particle->vy = _particle->vy-2*vn*n.y; 
         _particle->vz = _particle->vz-2*vn*n.z; 
         double q = V2Q*(-2)*vn/sqrt(pv.x*pv.x + pv.y*pv.y + pv.z*pv.z);
-        if (s.reflect.has_table) { /* check if there is a reflectivity table */
-            ref = Table_Value(s.reflect.dTable, q, 1); /* apply the reflectivity data for the given Q-value */
+        /* check if there is a valid reflectivity table */
+        if (s.reflect.has_table) {
+            /* apply the interpolated reflectivity  data value for the given Q-value */
+            TableReflecFunc (q, &s.reflect.dTable, &ref); 
         }
         else {
         double par[5] = {s.R0, s.Qc, s.alpha, s.m, s.W};
         StdReflecFunc(q, par, &ref);
-	_particle->p = _particle->p * ref;
         }
+    _particle->p = _particle->p * ref;
+
     if (disp>0) {
 		printf("\n pv final = %f, %f, %f",pv.x,pv.y,pv.z);
 	}
