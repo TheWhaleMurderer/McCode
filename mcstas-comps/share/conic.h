@@ -964,7 +964,7 @@ ConicSurf makeHyperboloid(double f1, double f2, Point p,
 @see ConicSurf
 */     
 ConicSurf makeEllipsoid(double f1, double f2, Point p, 
-			double zstart, double zend, double m, double R0, double Qc, double alpha, double W) {
+			double zstart, double zend, double m, double R0, double Qc, double alpha, double W, ReflecParam reflect) {
     ConicSurf s;
     s.zs = zstart;
     s.ze = zend;
@@ -979,6 +979,7 @@ ConicSurf makeEllipsoid(double f1, double f2, Point p,
     s.k2 = 2*s.k3*(c-f1);
     s.k1 = (s.k3)*(c-f1)*(c-f1)-c*c+a*a;
 
+    s.reflect = reflect;
     s.m = m;
     s.R0 = R0;
     s.Qc = Qc;
@@ -1015,7 +1016,8 @@ ConicSurf makeEllipsoid(double f1, double f2, Point p,
 
 @see ConicSurf
 */
-FlatSurf makeFlatEllipse(double f1, double f2, Point p, double zstart, double zend, double ll, double rl, double m, double R0, double Qc, double alpha, double W) {
+FlatSurf makeFlatEllipse(double f1, double f2, Point p,
+     double zstart, double zend, double ll, double rl, double m, double R0, double Qc, double alpha, double W) {
     FlatSurf s;
     s.zs = zstart;
     s.ze = zend;
@@ -1249,12 +1251,12 @@ ConicSurf* addHyperboloid(double f1, double f2, Point p, double zstart,
 @see ConicSurf
 */
 ConicSurf* addEllipsoid(double f1, double f2, Point p, double zstart,
-    double zend, double m, double R0, double Qc, double alpha, double W, Scene* s) {
+    double zend, double m, double R0, double Qc, double alpha, double W, ReflectParam reflect, Scene* s) {
     if (s->num_c >= MAX_CONICSURF-1) {
         fprintf(stderr,"TOO MANY CONICSURF IN SCENE");
         exit(-1);
     }
-    s->c[s->num_c] = makeEllipsoid(f1,f2,p,zstart,zend,m,R0,Qc,alpha,W);
+    s->c[s->num_c] = makeEllipsoid(f1,f2,p,zstart,zend,m,R0,Qc,alpha,W,reflect);
     s->num_c++;
     return &s->c[s->num_c-1];
 }

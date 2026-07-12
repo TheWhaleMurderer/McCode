@@ -72,6 +72,19 @@ INITIALIZE
   double th_c, alpha_p, alpha_h, fp2, dr, rr, cH, theta_1, theta_2, theta_i;
   int i;
 
+
+  if (reflect != NULL && strlen(reflect) > 0 &&
+    strcmp(reflect, "0") && strcmp(reflect, "NULL")) {
+    if (Table_Read(&Parameters.dTable, reflect, 0) > 0) {
+        has_reflect = 1;
+	Parameters.has_table=1;
+	//	Parameters.dTable=dTable;
+    } else {
+        exit(fprintf(stderr, "Conics_PH: %s: can not read file %s\n",
+                     NAME_CURRENT_COMP, reflect));
+    }
+
+
   s = makeScene ();
   /* Mode a, vector of radii */
   if (radii) {
